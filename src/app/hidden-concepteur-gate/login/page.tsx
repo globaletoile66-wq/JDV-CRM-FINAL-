@@ -133,17 +133,125 @@ export default function ConcepteurLoginPage() {
         );
       }
 
+ 'use client';
+
+import React, { FormEvent, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { createClient } from '@/lib/supabase/client';
+
+const AUTHORIZED_CONCEPTEURS = [
+  {
+    email: 'romarica15@gmail.com',
+    userId: '57e90659-4ace-4824-aa4f-de84317622e8',
+  },
+  {
+    email: 'ets.miracle.jdv@gmail.com',
+    userId: '2e2b8bd7-d736-4e75-ab21-9e6e7b5cb1a1',
+  },
+] as const;
+
+export default function ConcepteurLoginPage() {
+  const router = useRouter();
+  const supabase = createClient();
+
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+
+  const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    setErrorMessage('');
+    setLoading(true);
+
+    try {
+      /**
+       * --------------------------------------------------------
+       * 1. NETTOYAGE DES INFORMATIONS
+       * --------------------------------------------------------
+       */
+      const normalizedEmail = email.trim().toLowerCase();
+
+      if (!normalizedEmail || !password) {
+        throw new Error(
+          'Veuillez renseigner votre adresse e-mail et votre mot de passe.'
+        );
+      }
+
+      /**
+       * --------------------------------------------------------
+       * 2. VÉRIFICATION DU COMPTE CONCEPTEUR AUTORISÉ
+       * --------------------------------------------------------
+       */
+      const authorizedAccount = AUTHORIZED_CONCEPTEURS.find(
+        (account) =>
+          account.email.toLowerCase() === normalizedEmail
+      );
+
+      if (!authorizedAccount) {
+        throw new Error(
+          'Accès refusé. Cette adresse e-mail n’est pas autorisée comme compte SUPER ADMIN / CONCEPTEUR.'
+        );
+      }
+
+      /**
+       * --------------------------------------------------------
+       * 3. CONNEXION SUPABASE AUTH
+       * --------------------------------------------------------
+       */
+      const {
+        data: authData,
+        error: authError,
+      } = await supabase.auth.signInWithPassword({
+        email: normalizedEmail,
+        password,
+      });
+
+      if (authError) {
+        console.error(
+          'SUPABASE AUTH ERROR =',
+          authError
+        );
+
+        throw new Error(
+          authError.message ||
+            'Impossible de se connecter à Supabase Authentication.'
+        );
+      }
+
+      if (!authData.user) {
+        throw new Error(
+          'Aucun utilisateur Supabase n’a été retourné après la connexion.'
+        );
+      }
+
+      /**
+       * --------------------------------------------------------
+       * 4. RÉCUPÉRATION ET DIAGNOSTIC DE L'UID
+       * --------------------------------------------------------
+       */
       const authenticatedUserId =
         authData.user.id;
-console.log('AUTH USER ID =', authenticatedUserId);
-console.log('AUTHORIZED USER ID =', authorizedAccount.userId);
-console.log('AUTH EMAIL =', authData.user.email);
- const {
-  data: superAdmin,
-  error: superAdminError,
-} = await supabase     /**
-console.log('SUPER ADMIN DATA =', superAdmin);
-console.log('SUPER ADMIN ERROR =', superAdminError);       * --------------------------------------------------------
+
+      console.log(
+        'AUTH USER ID =',
+        authenticatedUserId
+      );
+
+      console.log(
+        'AUTHORIZED USER ID =',
+        authorizedAccount.userId
+      );
+
+      console.log(
+        'AUTH EMAIL =',
+        authData.user.email
+      );
+
+      /**
+       * --------------------------------------------------------
        * 5. VÉRIFICATION STRICTE DE L'UID
        * --------------------------------------------------------
        */
@@ -152,7 +260,7 @@ console.log('SUPER ADMIN ERROR =', superAdminError);       * -------------------
         authorizedAccount.userId
       ) {
         console.error(
-          'UID CONCEPTEUR NON AUTORISÉ:',
+          'UID CONCEPTEUR NON AUTORISÉ =',
           authenticatedUserId
         );
 
@@ -186,30 +294,43 @@ console.log('SUPER ADMIN ERROR =', superAdminError);       * -------------------
         )
         .maybeSingle();
 
+      console.log(
+        'SUPER ADMIN DATA =',
+        superAdmin
+      );
+
+      console.log(
+        'SUPER ADMIN ERROR =',
+        superAdminError
+      );
+
       /**
        * --------------------------------------------------------
-       * 7. ERREUR DATABASE
+       * 7. GESTION D'UNE ERREUR DE BASE DE DONNÉES
        * --------------------------------------------------------
        */
       if (superAdminError) {
         console.error(
-          'SUPER ADMIN DATABASE ERROR:',
+          'ERREUR LECTURE super_admins =',
           superAdminError
         );
 
-        await supabase.auth.signOut();
-
         throw new Error(
-          'Impossible de vérifier les autorisations SUPER ADMIN. Vérifiez la table super_admins et ses politiques RLS.'
+          `Erreur lors de la vérification des droits SUPER ADMIN : ${superAdminError.message}`
         );
       }
 
       /**
        * --------------------------------------------------------
-       * 8. COMPTE ABSENT DE super_admins
+       * 8. VÉRIFICATION DE L'EXISTENCE DU SUPER ADMIN
        * --------------------------------------------------------
        */
       if (!superAdmin) {
+        console.error(
+          'AUCUN SUPER ADMIN TROUVÉ POUR UID =',
+          authenticatedUserId
+        );
+
         await supabase.auth.signOut();
 
         throw new Error(
@@ -219,314 +340,233 @@ console.log('SUPER ADMIN ERROR =', superAdminError);       * -------------------
 
       /**
        * --------------------------------------------------------
-       * 9. COMPTE DÉSACTIVÉ
+       * 9. VÉRIFICATION DU STATUT actif
        * --------------------------------------------------------
        */
-      if (superAdmin.actif !== true) {
+      if (
+        superAdmin.actif !== true
+      ) {
+        console.error(
+          'COMPTE SUPER ADMIN DÉSACTIVÉ =',
+          superAdmin
+        );
+
         await supabase.auth.signOut();
 
         throw new Error(
-          'Ce compte SUPER ADMIN est actuellement désactivé.'
+          'Accès refusé. Le compte SUPER ADMIN est actuellement désactivé.'
         );
       }
 
       /**
        * --------------------------------------------------------
-       * 10. VÉRIFICATION FINALE DU STATUT
+       * 10. VÉRIFICATION DU STATUS
        * --------------------------------------------------------
        */
-      if (superAdmin.status !== 'active') {
+      if (
+        superAdmin.status !== 'active'
+      ) {
+        console.error(
+          'STATUS SUPER ADMIN INACTIF =',
+          superAdmin.status
+        );
+
         await supabase.auth.signOut();
 
         throw new Error(
-          'Le compte SUPER ADMIN n’est pas actif.'
+          'Accès refusé. Le compte SUPER ADMIN n’est pas actif.'
         );
       }
 
       /**
        * --------------------------------------------------------
-       * 11. CONNEXION RÉUSSIE
+       * 11. CONNEXION VALIDÉE
        * --------------------------------------------------------
        */
       console.log(
-        'CONCEPTEUR AUTHENTIFIÉ:',
-        authenticatedUserId
+        '✅ SUPER ADMIN AUTHENTIFIÉ AVEC SUCCÈS'
       );
 
-      window.location.replace(
+      console.log(
+        'SUPER ADMIN ID =',
+        superAdmin.id
+      );
+
+      console.log(
+        'SUPER ADMIN USER ID =',
+        superAdmin.user_id
+      );
+
+      console.log(
+        'SUPER ADMIN STATUS =',
+        superAdmin.status
+      );
+
+      console.log(
+        'SUPER ADMIN ACTIF =',
+        superAdmin.actif
+      );
+
+      /**
+       * --------------------------------------------------------
+       * 12. REDIRECTION VERS LE DASHBOARD CONCEPTEUR
+       * --------------------------------------------------------
+       */
+      router.push(
         '/hidden-concepteur-gate/dashboard'
       );
-    } catch (err: unknown) {
+
+      router.refresh();
+    } catch (error) {
       console.error(
-        'CONCEPTEUR LOGIN ERROR:',
-        err
+        'ERREUR CONNEXION CONCEPTEUR =',
+        error
       );
 
-      const message =
-        err instanceof Error
-          ? err.message
-          : 'Une erreur est survenue pendant l’authentification.';
-
-      setError(message);
+      if (error instanceof Error) {
+        setErrorMessage(error.message);
+      } else {
+        setErrorMessage(
+          'Une erreur inattendue est survenue lors de la connexion.'
+        );
+      }
+    } finally {
       setLoading(false);
     }
   };
 
-  /**
-   * ============================================================
-   * SÉLECTION RAPIDE D'UN COMPTE
-   * ============================================================
-   */
-  const selectAccount = (accountEmail: string) => {
-    setEmail(accountEmail);
-    setPassword('');
-    setError('');
-  };
-
-  /**
-   * ============================================================
-   * INTERFACE
-   * ============================================================
-   */
   return (
-    <div
-      className="min-h-screen flex items-center justify-center px-4"
-      style={{
-        background: '#000000',
-        backgroundImage:
-          'radial-gradient(circle, rgba(212,175,55,0.04) 1px, transparent 1px)',
-        backgroundSize: '30px 30px',
-      }}
-    >
-      <div className="w-full max-w-sm">
-        <div
-          className="rounded-2xl p-8"
-          style={{
-            background: '#050A14',
-            border:
-              '1px solid rgba(212,175,55,0.2)',
-            boxShadow:
-              '0 0 60px rgba(212,175,55,0.05), 0 8px 40px rgba(0,0,0,0.8)',
-          }}
-        >
-          {/* =====================================================
-              HEADER
-          ====================================================== */}
+    <main className="min-h-screen bg-[#0B1B3D] flex items-center justify-center px-4">
+      <div className="w-full max-w-md">
+        <div className="bg-white rounded-2xl shadow-2xl p-8">
           <div className="text-center mb-8">
-            <p
-              className="text-xs tracking-[0.4em] uppercase font-semibold"
-              style={{
-                color: '#D4AF37',
-              }}
-            >
-              System Access
-            </p>
+            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-[#0B1B3D]">
+              <span className="text-2xl font-bold text-[#D4AF37]">
+                JDV
+              </span>
+            </div>
 
-            <div
-              className="w-8 h-px mx-auto mt-3"
-              style={{
-                background:
-                  'rgba(212,175,55,0.3)',
-              }}
-            />
+            <h1 className="text-2xl font-bold text-[#0B1B3D]">
+              SUPER ADMIN
+            </h1>
 
-            <p
-              className="text-[10px] uppercase tracking-widest mt-4"
-              style={{
-                color: '#4A5568',
-              }}
-            >
-              JDV CRM · Concepteur
+            <p className="mt-2 text-sm text-gray-500">
+              Espace CONCEPTEUR JDV CRM
             </p>
           </div>
 
-          {/* =====================================================
-              FORMULAIRE
-          ====================================================== */}
+          {errorMessage && (
+            <div className="mb-5 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+              {errorMessage}
+            </div>
+          )}
+
           <form
             onSubmit={handleLogin}
             className="space-y-5"
           >
-            {/* EMAIL */}
             <div>
               <label
-                className="block text-xs font-semibold uppercase tracking-wider mb-2"
-                style={{
-                  color: '#4A5568',
-                }}
+                htmlFor="email"
+                className="mb-2 block text-sm font-medium text-gray-700"
               >
-                Email du concepteur
+                Adresse e-mail
               </label>
 
               <input
+                id="email"
                 type="email"
                 value={email}
-                onChange={(e) =>
-                  setEmail(e.target.value)
+                onChange={(event) =>
+                  setEmail(event.target.value)
                 }
-                placeholder="romarica15@gmail.com"
-                required
-                autoComplete="username"
+                placeholder="Votre adresse e-mail"
+                autoComplete="email"
                 disabled={loading}
-                className="w-full rounded-xl px-4 py-3 text-white text-sm outline-none transition-all"
-                style={{
-                  background:
-                    'rgba(255,255,255,0.03)',
-                  border:
-                    '1px solid rgba(212,175,55,0.15)',
-                  caretColor: '#D4AF37',
-                  opacity: loading ? 0.6 : 1,
-                }}
+                className="w-full rounded-lg border border-gray-300 px-4 py-3 text-gray-900 outline-none transition focus:border-[#D4AF37] focus:ring-2 focus:ring-[#D4AF37]/20 disabled:bg-gray-100"
               />
             </div>
 
-            {/* PASSWORD */}
             <div>
               <label
-                className="block text-xs font-semibold uppercase tracking-wider mb-2"
-                style={{
-                  color: '#4A5568',
-                }}
+                htmlFor="password"
+                className="mb-2 block text-sm font-medium text-gray-700"
               >
                 Mot de passe
               </label>
 
-              <input
-                type="password"
-                value={password}
-                onChange={(e) =>
-                  setPassword(e.target.value)
-                }
-                placeholder="••••••••••••••"
-                required
-                autoComplete="current-password"
-                disabled={loading}
-                className="w-full rounded-xl px-4 py-3 text-white text-sm outline-none transition-all"
-                style={{
-                  background:
-                    'rgba(255,255,255,0.03)',
-                  border:
-                    '1px solid rgba(212,175,55,0.15)',
-                  caretColor: '#D4AF37',
-                  opacity: loading ? 0.6 : 1,
-                }}
-              />
+              <div className="relative">
+                <input
+                  id="password"
+                  type={
+                    showPassword
+                      ? 'text'
+                      : 'password'
+                  }
+                  value={password}
+                  onChange={(event) =>
+                    setPassword(
+                      event.target.value
+                    )
+                  }
+                  placeholder="••••••••"
+                  autoComplete="current-password"
+                  disabled={loading}
+                  className="w-full rounded-lg border border-gray-300 px-4 py-3 pr-12 text-gray-900 outline-none transition focus:border-[#D4AF37] focus:ring-2 focus:ring-[#D4AF37]/20 disabled:bg-gray-100"
+                />
+
+                <button
+                  type="button"
+                  onClick={() =>
+                    setShowPassword(
+                      !showPassword
+                    )
+                  }
+                  disabled={loading}
+                  aria-label={
+                    showPassword
+                      ? 'Masquer le mot de passe'
+                      : 'Afficher le mot de passe'
+                  }
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-[#0B1B3D]"
+                >
+                  {showPassword ? '🙈' : '👁️'}
+                </button>
+              </div>
             </div>
 
-            {/* ERREUR */}
-            {error && (
-              <div
-                className="text-xs text-center rounded-lg px-3 py-3"
-                style={{
-                  color: '#FC8181',
-                  background:
-                    'rgba(252,129,129,0.08)',
-                  border:
-                    '1px solid rgba(252,129,129,0.2)',
-                  lineHeight: '1.5',
-                }}
-              >
-                {error}
-              </div>
-            )}
-
-            {/* AVERTISSEMENT */}
-            <p
-              className="text-xs text-center"
-              style={{
-                color: '#7B2D2D',
-              }}
-            >
-              ⚠ Unauthorized access is monitored
-              and prosecuted
-            </p>
-
-            {/* BOUTON */}
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3.5 rounded-xl font-bold text-sm tracking-widest uppercase transition-all"
-              style={{
-                background: loading
-                  ? 'rgba(212,175,55,0.2)'
-                  : 'linear-gradient(135deg, #D4AF37 0%, #F5E17A 40%, #D4AF37 60%, #A8860C 100%)',
-                color: loading
-                  ? '#D4AF37' :'#000000',
-                boxShadow: loading
-                  ? 'none' :'0 4px 20px rgba(212,175,55,0.2)',
-                cursor: loading
-                  ? 'not-allowed' :'pointer',
-              }}
+              className="w-full rounded-lg bg-[#0B1B3D] px-4 py-3 font-semibold text-white transition hover:bg-[#132957] disabled:cursor-not-allowed disabled:opacity-60"
             >
               {loading
-                ? 'Vérification...'
-                : 'Authentifier'}
+                ? 'Connexion en cours...'
+                : 'Se connecter'}
             </button>
           </form>
 
-          {/* =====================================================
-              COMPTES CONCEPTEURS AUTORISÉS
-          ====================================================== */}
-          <div
-            className="mt-5 pt-4"
-            style={{
-              borderTop:
-                '1px solid rgba(212,175,55,0.08)',
-            }}
-          >
-            <p
-              className="text-[9px] uppercase tracking-widest text-center mb-3"
-              style={{
-                color: '#4A5568',
-              }}
-            >
-              Comptes concepteurs autorisés
-            </p>
-
-            <div className="space-y-2">
-              {AUTHORIZED_CONCEPTEURS.map(
-                (account) => (
-                  <button
-                    key={account.userId}
-                    type="button"
-                    disabled={loading}
-                    onClick={() =>
-                      selectAccount(account.email)
-                    }
-                    className="w-full rounded-lg px-3 py-2 text-left transition-all"
-                    style={{
-                      color: '#D4AF37',
-                      border:
-                        '1px solid rgba(212,175,55,0.1)',
-                      background:
-                        'rgba(212,175,55,0.02)',
-                      opacity: loading ? 0.5 : 1,
-                      cursor: loading
-                        ? 'not-allowed' :'pointer',
-                    }}
-                  >
-                    <span className="text-xs font-semibold">
-                      {account.email}
-                    </span>
-                  </button>
+          <div className="mt-6 text-center">
+            <button
+              type="button"
+              onClick={() =>
+                router.push(
+                  '/hidden-concepteur-gate/forgot-password'
                 )
-              )}
-            </div>
+              }
+              className="text-sm font-medium text-[#0B1B3D] underline hover:text-[#D4AF37]"
+            >
+              Mot de passe oublié ?
+            </button>
+          </div>
+
+          <div className="mt-8 border-t border-gray-200 pt-5 text-center">
+            <p className="text-xs text-gray-400">
+              Accès sécurisé — JDV CRM
+            </p>
           </div>
         </div>
-
-        {/* =====================================================
-            FOOTER
-        ====================================================== */}
-        <p
-          className="text-center text-[9px] uppercase tracking-widest mt-5"
-          style={{
-            color: '#252B38',
-          }}
-        >
-          Protected creator access · JDV CRM
-        </p>
       </div>
-    </div>
+    </main>
   );
 }
