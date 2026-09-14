@@ -10,11 +10,7 @@ export interface EnterpriseRow {
   id: string;
   nom_entreprise: string;
   status_abonnement:
-    | 'active'
-    | 'pending'
-    | 'suspendu'
-    | 'trial'
-    | 'expired';
+    | 'active' |'pending' |'suspendu' |'trial' |'expired';
   date_fin_abonnement: string | null;
   trial_start_date: string | null;
   trial_end_date: string | null;
@@ -743,9 +739,7 @@ export async function toggleEnterpriseStatus(
   }
 
   const newStatus =
-    action === 'activate'
-      ? 'active'
-      : 'suspended';
+    action === 'activate' ?'active' :'suspended';
 
   const { error } = await supabase
     .from('organizations')

@@ -786,8 +786,7 @@ if (authData.session) {
                   id="password"
                   type={
                     showPassword
-                      ? 'text'
-                      : 'password'
+                      ? 'text' :'password'
                   }
                   autoComplete="current-password"
                   value={password}
@@ -813,8 +812,7 @@ if (authData.session) {
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium text-[#D4AF37] hover:text-white disabled:opacity-50"
                 >
                   {showPassword
-                    ? 'Masquer'
-                    : 'Afficher'}
+                    ? 'Masquer' :'Afficher'}
                 </button>
 
               </div>
@@ -861,8 +859,7 @@ if (authData.session) {
               className="w-full text-sm text-white/60 transition hover:text-[#D4AF37] disabled:opacity-50"
             >
               {resetLoading
-                ? 'Envoi en cours…'
-                : 'Mot de passe oublié ?'}
+                ? 'Envoi en cours…' :'Mot de passe oublié ?'}
             </button>
 
           </form>
