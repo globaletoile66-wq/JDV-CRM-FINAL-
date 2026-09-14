@@ -214,7 +214,7 @@ export default function PerformancePage() {
 
       if (!prospecteur) {
         throw new Error(
-          'Aucun compte prospecteur actif n\u2019est associé à cet utilisateur.'
+          "Aucun compte prospecteur actif n'est associe a cet utilisateur."
         );
       }
 

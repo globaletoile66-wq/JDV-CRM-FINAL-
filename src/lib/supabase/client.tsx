@@ -6,8 +6,9 @@ export function createClient() {
   const supabaseUrl =
     process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
 
-  const supabasePublishableKey =
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY?.trim();
+  const supabaseKey =
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY?.trim() ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
 
   if (!supabaseUrl) {
     throw new Error(
@@ -15,14 +16,14 @@ export function createClient() {
     );
   }
 
-  if (!supabasePublishableKey) {
+  if (!supabaseKey) {
     throw new Error(
-      "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY est manquante dans les variables d'environnement."
+      "NEXT_PUBLIC_SUPABASE_ANON_KEY est manquante dans les variables d'environnement."
     );
   }
 
   return createBrowserClient(
     supabaseUrl,
-    supabasePublishableKey
+    supabaseKey
   );
 }

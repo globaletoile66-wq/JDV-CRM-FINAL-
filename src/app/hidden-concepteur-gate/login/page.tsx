@@ -136,7 +136,7 @@ export default function ConcepteurLoginPage() {
 
       if (!authorizedAccount) {
         setErrorMessage(
-          'Cette adresse e-mail n’est pas autorisée à accéder à l’espace SUPER ADMIN / CONCEPTEUR.'
+          "Cette adresse e-mail n'est pas autorisée à accéder à l'espace SUPER ADMIN / CONCEPTEUR."
         );
         return;
       }
@@ -187,7 +187,7 @@ export default function ConcepteurLoginPage() {
 
       if (!authData.user) {
         setErrorMessage(
-          'Supabase n’a retourné aucun utilisateur après la connexion.'
+          "Supabase n'a retourné aucun utilisateur après la connexion."
         );
         return;
       }
@@ -295,7 +295,7 @@ export default function ConcepteurLoginPage() {
         await supabase.auth.signOut();
 
         setErrorMessage(
-          'Accès refusé. Votre compte Supabase est authentifié, mais aucune autorisation SUPER ADMIN active n’a été trouvée.'
+          "Accès refusé. Votre compte Supabase est authentifié, mais aucune autorisation SUPER ADMIN active n’a été trouvée."
         );
 
         return;
@@ -421,7 +421,7 @@ export default function ConcepteurLoginPage() {
 
     if (!authorizedAccount) {
       setErrorMessage(
-        'Cette adresse e-mail n’est pas autorisée à utiliser la récupération du compte SUPER ADMIN.'
+        "Cette adresse e-mail n'est pas autorisée à utiliser la récupération du compte SUPER ADMIN."
       );
       return;
     }
@@ -535,8 +535,7 @@ export default function ConcepteurLoginPage() {
                   id="password"
                   type={
                     showPassword
-                      ? 'text'
-                      : 'password'
+                      ? 'text' :'password'
                   }
                   autoComplete="current-password"
                   value={password}
@@ -559,8 +558,7 @@ export default function ConcepteurLoginPage() {
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium text-[#D4AF37] hover:text-white disabled:opacity-50"
                 >
                   {showPassword
-                    ? 'Masquer'
-                    : 'Afficher'}
+                    ? 'Masquer' :'Afficher'}
                 </button>
 
               </div>
@@ -603,8 +601,7 @@ export default function ConcepteurLoginPage() {
               className="w-full text-sm text-white/60 transition hover:text-[#D4AF37] disabled:opacity-50"
             >
               {resetLoading
-                ? 'Envoi en cours…'
-                : 'Mot de passe oublié ?'}
+                ? 'Envoi en cours…' :'Mot de passe oublié ?'}
             </button>
 
           </form>
