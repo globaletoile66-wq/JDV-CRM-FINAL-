@@ -203,7 +203,6 @@ export default function ConcepteurLoginPage() {
        * On utilise un tableau au lieu de maybeSingle()
        * afin de voir exactement ce que Supabase retourne.
        */
-/**
  * --------------------------------------------------------
  * 6. VÉRIFICATION SÉCURISÉE DU SUPER ADMIN
  * --------------------------------------------------------
