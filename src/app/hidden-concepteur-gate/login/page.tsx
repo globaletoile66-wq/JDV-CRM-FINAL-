@@ -124,7 +124,15 @@ export default function ConcepteurLoginPage() {
         'AUTHORIZED USER ID =',
         authorizedAccount.userId
       );
+const {
+  data: sessionData,
+  error: sessionError,
+} = await supabase.auth.getSession();
 
+console.log('SESSION USER ID =', sessionData.session?.user?.id);
+console.log('SESSION EMAIL =', sessionData.session?.user?.email);
+console.log('SESSION ROLE =', sessionData.session?.user?.role);
+console.log('SESSION ERROR =', sessionError);
       console.log(
         'AUTH EMAIL =',
         authData.user.email
