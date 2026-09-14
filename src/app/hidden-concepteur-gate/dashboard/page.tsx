@@ -439,12 +439,43 @@ export default function ConcepteurDashboardPage() {
        */
       const { data: superAdmin, error: superAdminError } =
         await supabase
-          .from('super_admins')
-          .select('id, user_id, status, actif')
-          .eq('user_id', user.id)
-          .eq('status', 'active')
-          .eq('actif', true)
-          .maybeSingle();
+ const {
+  data: superAdminResult,
+  error: superAdminError,
+} = await supabase.rpc(
+  'verify_current_super_admin'
+);
+
+if (superAdminError) {
+  console.error(
+    'Erreur vérification SUPER ADMIN:',
+    superAdminError
+  );
+
+  router.replace(
+    '/hidden-concepteur-gate/login'
+  );
+
+  return;
+}
+
+const superAdmin = Array.isArray(superAdminResult)
+  ? superAdminResult[0]
+  : superAdminResult;
+
+if (
+  !superAdmin ||
+  superAdmin.is_super_admin !== true ||
+  superAdmin.user_id !== user.id
+) {
+  await supabase.auth.signOut();
+
+  router.replace(
+    '/hidden-concepteur-gate/login'
+  );
+
+  return;
+}
 
       if (superAdminError) {
         console.error(
