@@ -437,54 +437,27 @@ export default function ConcepteurDashboardPage() {
        * SECURITY CHECK
        * Le SUPER ADMIN est contrôlé par la table super_admins.
        */
-      const { data: superAdmin, error: superAdminError } =
-        await supabase
- const {
-  data: superAdminResult,
-  error: superAdminError,
-} = await supabase.rpc(
-  'verify_current_super_admin'
-);
-
-if (superAdminError) {
-  console.error(
-    'Erreur vérification SUPER ADMIN:',
-    superAdminError
-  );
-
-  router.replace(
-    '/hidden-concepteur-gate/login'
-  );
-
-  return;
-}
-
-const superAdmin = Array.isArray(superAdminResult)
-  ? superAdminResult[0]
-  : superAdminResult;
-
-if (
-  !superAdmin ||
-  superAdmin.is_super_admin !== true ||
-  superAdmin.user_id !== user.id
-) {
-  await supabase.auth.signOut();
-
-  router.replace(
-    '/hidden-concepteur-gate/login'
-  );
-
-  return;
-}
+      const { data: superAdminResult, error: superAdminError } =
+        await supabase.rpc('verify_current_super_admin');
 
       if (superAdminError) {
         console.error(
           'Erreur vérification SUPER ADMIN:',
           superAdminError
         );
+        router.replace('/hidden-concepteur-gate/login');
+        return;
       }
 
-      if (!superAdmin) {
+      const superAdmin = Array.isArray(superAdminResult)
+        ? superAdminResult[0]
+        : superAdminResult;
+
+      if (
+        !superAdmin ||
+        superAdmin.is_super_admin !== true ||
+        superAdmin.user_id !== user.id
+      ) {
         await supabase.auth.signOut();
         router.replace('/hidden-concepteur-gate/login');
         return;

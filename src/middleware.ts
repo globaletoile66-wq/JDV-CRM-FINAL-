@@ -8,12 +8,21 @@ export async function middleware(request: NextRequest) {
     },
   });
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
   const supabaseKey =
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    (process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY)?.trim();
 
-  if (!supabaseUrl || !supabaseKey) {
+  const isValidUrl = (url: string) => {
+    try {
+      const parsed = new URL(url);
+      return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    } catch {
+      return false;
+    }
+  };
+
+  if (!supabaseUrl || !supabaseKey || !isValidUrl(supabaseUrl)) {
     console.error(
       '[JDV CRM] Variables Supabase manquantes dans le middleware.',
     );
