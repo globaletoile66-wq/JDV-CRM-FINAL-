@@ -30,17 +30,34 @@ export default function ConcepteurLoginPage() {
   const [successMessage, setSuccessMessage] = useState('');
 
   /*
-   * Vérifie uniquement s'il existe déjà une session.
-   * Ne bloque pas la connexion si getSession() ne retourne
-   * pas immédiatement la session après une connexion.
+   * Vérification d'une session existante.
    */
   useEffect(() => {
     let mounted = true;
 
     const checkExistingSession = async () => {
       try {
-        const { data } =
+        const { data, error } =
           await supabase.auth.getSession();
+
+        console.log(
+          '=== JDV CRM — SESSION EXISTANTE ==='
+        );
+        console.log(
+          'SESSION USER ID =',
+          data.session?.user?.id ?? null
+        );
+        console.log(
+          'SESSION EMAIL =',
+          data.session?.user?.email ?? null
+        );
+        console.log(
+          'SESSION ERROR =',
+          error ?? null
+        );
+        console.log(
+          '==================================='
+        );
 
         if (!mounted) return;
 
@@ -48,12 +65,13 @@ export default function ConcepteurLoginPage() {
           return;
         }
 
-        const userId = data.session.user.id;
+        const sessionUserId =
+          data.session.user.id;
 
         const authorized =
           AUTHORIZED_CONCEPTEURS.some(
             (account) =>
-              account.userId === userId
+              account.userId === sessionUserId
           );
 
         if (authorized) {
@@ -93,7 +111,9 @@ export default function ConcepteurLoginPage() {
 
     try {
       /*
-       * Vérifications de base
+       * -----------------------------------------------------
+       * 1. Vérification des champs
+       * -----------------------------------------------------
        */
       if (!normalizedEmail || !password) {
         setErrorMessage(
@@ -103,7 +123,9 @@ export default function ConcepteurLoginPage() {
       }
 
       /*
-       * Vérification de l'e-mail autorisé
+       * -----------------------------------------------------
+       * 2. Vérification de l'e-mail autorisé
+       * -----------------------------------------------------
        */
       const authorizedAccount =
         AUTHORIZED_CONCEPTEURS.find(
@@ -120,9 +142,9 @@ export default function ConcepteurLoginPage() {
       }
 
       /*
-       * =====================================================
-       * 1. AUTHENTIFICATION SUPABASE
-       * =====================================================
+       * -----------------------------------------------------
+       * 3. AUTHENTIFICATION SUPABASE
+       * -----------------------------------------------------
        */
       const {
         data: authData,
@@ -137,7 +159,7 @@ export default function ConcepteurLoginPage() {
         '=========================================='
       );
       console.log(
-        'JDV CRM — RÉSULTAT AUTHENTIFICATION'
+        'JDV CRM — AUTHENTIFICATION'
       );
       console.log(
         'AUTH USER ID =',
@@ -155,24 +177,17 @@ export default function ConcepteurLoginPage() {
         '=========================================='
       );
 
-      /*
-       * Erreur Auth
-       */
       if (authError) {
         setErrorMessage(
           authError.message ||
-            'Identifiants incorrects ou impossible de se connecter.'
+            'Impossible de vous connecter.'
         );
         return;
       }
 
-      /*
-       * Supabase doit obligatoirement retourner
-       * un utilisateur après signInWithPassword().
-       */
       if (!authData.user) {
         setErrorMessage(
-          'Supabase a authentifié la demande mais n’a retourné aucun utilisateur.'
+          'Supabase n’a retourné aucun utilisateur après la connexion.'
         );
         return;
       }
@@ -181,9 +196,9 @@ export default function ConcepteurLoginPage() {
         authData.user.id;
 
       /*
-       * =====================================================
-       * 2. VÉRIFICATION UID
-       * =====================================================
+       * -----------------------------------------------------
+       * 4. VÉRIFICATION DE L'UID
+       * -----------------------------------------------------
        */
       if (
         authenticatedUserId !==
@@ -213,23 +228,31 @@ export default function ConcepteurLoginPage() {
       );
 
       /*
-       * =====================================================
-       * 3. VÉRIFICATION DES DROITS SUPER ADMIN
-       * =====================================================
+       * -----------------------------------------------------
+       * 5. VÉRIFICATION DIRECTE DANS super_admins
+       * -----------------------------------------------------
        *
-       * IMPORTANT :
-       * Nous ne faisons PLUS de getSession() ici.
+       * Pas de RPC.
+       * Pas de SECURITY DEFINER.
+       * Pas de service_role.
        *
-       * La vérification est faite avec l'UID retourné
-       * directement par Supabase Auth.
+       * La politique RLS super_admins_select_own
+       * autorise l'utilisateur à lire sa propre ligne.
        */
       const {
-        data: isSuperAdmin,
+        data: superAdmin,
         error: superAdminError,
       } =
-        await supabase.rpc(
-          'verify_current_super_admin'
-        );
+        await supabase
+          .from('super_admins')
+          .select(
+            'user_id, status, actif'
+          )
+          .eq(
+            'user_id',
+            authenticatedUserId
+          )
+          .maybeSingle();
 
       console.log(
         '=========================================='
@@ -238,11 +261,11 @@ export default function ConcepteurLoginPage() {
         'JDV CRM — VÉRIFICATION SUPER ADMIN'
       );
       console.log(
-        'SUPER ADMIN RPC RESULT =',
-        isSuperAdmin
+        'SUPER ADMIN DATA =',
+        superAdmin
       );
       console.log(
-        'SUPER ADMIN RPC ERROR =',
+        'SUPER ADMIN ERROR =',
         superAdminError ?? null
       );
       console.log(
@@ -250,52 +273,92 @@ export default function ConcepteurLoginPage() {
       );
 
       /*
-       * Erreur RPC
+       * Erreur de lecture de la table
        */
       if (superAdminError) {
         console.error(
-          'Erreur RPC SUPER ADMIN :',
+          'Erreur lecture super_admins :',
           superAdminError
         );
 
         setErrorMessage(
-          `Erreur lors de la vérification des droits SUPER ADMIN : ${superAdminError.message}`
+          `Impossible de vérifier les droits SUPER ADMIN : ${superAdminError.message}`
         );
 
         return;
       }
 
       /*
-       * Compte non SUPER ADMIN
+       * Aucune ligne trouvée
        */
-      if (isSuperAdmin !== true) {
+      if (!superAdmin) {
         await supabase.auth.signOut();
 
         setErrorMessage(
-          'Accès refusé. Ce compte existe dans Supabase Authentication mais ne possède pas les droits SUPER ADMIN actifs dans JDV CRM.'
+          'Accès refusé. Votre compte Supabase est authentifié, mais aucune autorisation SUPER ADMIN active n’a été trouvée.'
         );
 
         return;
       }
 
       /*
-       * =====================================================
-       * 4. CONNEXION VALIDÉE
-       * =====================================================
+       * -----------------------------------------------------
+       * 6. VÉRIFICATION STATUS
+       * -----------------------------------------------------
+       */
+      const statusActive =
+        superAdmin.status === 'active';
+
+      const accountActive =
+        superAdmin.actif !== false;
+
+      if (
+        !statusActive ||
+        !accountActive
+      ) {
+        console.error(
+          'Compte SUPER ADMIN inactif',
+          superAdmin
+        );
+
+        await supabase.auth.signOut();
+
+        setErrorMessage(
+          'Accès refusé. Le compte SUPER ADMIN existe mais il est actuellement inactif.'
+        );
+
+        return;
+      }
+
+      /*
+       * -----------------------------------------------------
+       * 7. TOUT EST VALIDÉ
+       * -----------------------------------------------------
        */
       console.log(
         '=========================================='
       );
       console.log(
-        'JDV CRM — CONNEXION SUPER ADMIN VALIDÉE'
+        'JDV CRM — SUPER ADMIN VALIDÉ'
+      );
+      console.log(
+        'EMAIL =',
+        normalizedEmail
       );
       console.log(
         'UID =',
         authenticatedUserId
       );
       console.log(
-        'EMAIL =',
-        normalizedEmail
+        'STATUS =',
+        superAdmin.status
+      );
+      console.log(
+        'ACTIF =',
+        superAdmin.actif
+      );
+      console.log(
+        'REDIRECTION DASHBOARD'
       );
       console.log(
         '=========================================='
@@ -306,10 +369,11 @@ export default function ConcepteurLoginPage() {
       );
 
       /*
-       * Navigation
+       * Laisser Supabase terminer la persistance
+       * de l'authentification avant la navigation.
        */
       await new Promise((resolve) =>
-        setTimeout(resolve, 300)
+        setTimeout(resolve, 500)
       );
 
       router.replace(
@@ -502,21 +566,21 @@ export default function ConcepteurLoginPage() {
               </div>
             </div>
 
-            {/* MESSAGE ERREUR */}
+            {/* ERREUR */}
             {errorMessage && (
               <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
                 {errorMessage}
               </div>
             )}
 
-            {/* MESSAGE SUCCÈS */}
+            {/* SUCCÈS */}
             {successMessage && (
               <div className="rounded-lg border border-green-500/30 bg-green-500/10 px-4 py-3 text-sm text-green-300">
                 {successMessage}
               </div>
             )}
 
-            {/* CONNEXION */}
+            {/* BOUTON CONNEXION */}
             <button
               type="submit"
               disabled={
