@@ -6,24 +6,25 @@ export function createClient() {
   const supabaseUrl =
     process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
 
-  const supabaseKey =
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY?.trim() ||
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+  const supabasePublishableKey =
+    process.env
+      .NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+      ?.trim();
 
   if (!supabaseUrl) {
     throw new Error(
-      "NEXT_PUBLIC_SUPABASE_URL est manquante dans les variables d'environnement."
+      "NEXT_PUBLIC_SUPABASE_URL est manquante."
     );
   }
 
-  if (!supabaseKey) {
+  if (!supabasePublishableKey) {
     throw new Error(
-      "NEXT_PUBLIC_SUPABASE_ANON_KEY est manquante dans les variables d'environnement."
+      "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY est manquante."
     );
   }
 
   return createBrowserClient(
     supabaseUrl,
-    supabaseKey
+    supabasePublishableKey
   );
 }
