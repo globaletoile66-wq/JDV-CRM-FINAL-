@@ -1,19 +1,24 @@
 import { createClient } from '@/lib/supabase/client';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────────────────────────────────────
+const supabase = createClient();
+
+/* =========================================================
+   TYPES
+========================================================= */
 
 export interface EnterpriseRow {
   id: string;
   nom_entreprise: string;
   status_abonnement:
-    | 'active' |'pending' |'suspendu' |'trial' |'expired';
+    | 'active'
+    | 'pending'
+    | 'suspendu'
+    | 'trial'
+    | 'expired';
   date_fin_abonnement: string | null;
   trial_start_date: string | null;
   trial_end_date: string | null;
   created_at: string;
-
   ownerEmail: string;
   prospectorCount: number;
   mrr: string;
@@ -36,11 +41,109 @@ export interface FinancialAnalytics {
   activeSubscriptions: number;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Helpers
-// ─────────────────────────────────────────────────────────────────────────────
+/* =========================================================
+   INTERNAL TYPES
+========================================================= */
 
-function emptySuperAdminKPIs(): SuperAdminKPIs {
+interface OrganizationRow {
+  id: string;
+  name: string;
+  email: string | null;
+  status: string;
+  subscription_status: string;
+  created_at: string;
+}
+
+interface ProspecteurRow {
+  id: string;
+  organization_id: string;
+  status: string;
+}
+
+interface OrganizationSubscriptionRow {
+  id: string;
+  organization_id: string;
+  plan_id: string;
+  status: string;
+  started_at: string | null;
+  expires_at: string | null;
+  created_at: string;
+}
+
+interface SubscriptionPlanRow {
+  id: string;
+  code: string;
+  name: string;
+  price: number | string;
+  currency: string;
+  duration_days: number;
+}
+
+interface PaymentRow {
+  organization_id: string;
+  amount: number | string;
+  currency: string;
+  status: string;
+  payment_date: string;
+  created_at: string;
+}
+
+interface DailyTokenRow {
+  organization_id: string;
+  paid_amount: number | string;
+  status: string;
+  token_date: string;
+  paid_at: string | null;
+}
+
+interface SubscriptionPaymentRow {
+  amount: number | string;
+  currency: string;
+  status: string;
+  paid_at: string | null;
+  created_at: string;
+}
+
+/* =========================================================
+   CONSTANTES
+========================================================= */
+
+const SUCCESSFUL_PAYMENT_STATUSES = [
+  'success',
+  'successful',
+  'paid',
+  'completed',
+];
+
+const ACTIVE_SUBSCRIPTION_STATUSES = [
+  'active',
+];
+
+const TRIAL_SUBSCRIPTION_STATUSES = [
+  'trial',
+  'trialing',
+];
+
+const SUSPENDED_STATUSES = [
+  'suspended',
+  'suspendu',
+  'blocked',
+  'blocked',
+];
+
+const PENDING_STATUSES = [
+  'pending',
+  'inactive',
+  'past_due',
+  'cancelled',
+  'canceled',
+];
+
+/* =========================================================
+   HELPERS
+========================================================= */
+
+function emptyKPIs(): SuperAdminKPIs {
   return {
     total: 0,
     active: 0,
@@ -58,36 +161,70 @@ function emptyFinancialAnalytics(): FinancialAnalytics {
   };
 }
 
-function formatUsd(value: number): string {
-  return `${new Intl.NumberFormat('fr-FR', {
-    maximumFractionDigits: 0,
-  }).format(value)} USD`;
+function toNumber(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  return 0;
+}
+
+function isSuccessfulPayment(status: unknown): boolean {
+  return SUCCESSFUL_PAYMENT_STATUSES.includes(
+    String(status ?? '').toLowerCase()
+  );
 }
 
 function normalizeSubscriptionStatus(
-  status: string | null | undefined,
+  organizationStatus: string | null | undefined,
+  subscriptionStatus: string | null | undefined
 ): EnterpriseRow['status_abonnement'] {
-  switch (status) {
-    case 'active':
-      return 'active';
+  const orgStatus = String(organizationStatus ?? '').toLowerCase();
+  const subStatus = String(subscriptionStatus ?? '').toLowerCase();
 
-    case 'trial':
-      return 'trial';
-
-    case 'expired':
-      return 'expired';
-
-    case 'suspended': case'blocked':
-      return 'suspendu';
-
-    case 'pending': case'inactive': case'past_due': case'cancelled':
-    default:
-      return 'pending';
+  if (
+    SUSPENDED_STATUSES.includes(orgStatus) ||
+    SUSPENDED_STATUSES.includes(subStatus)
+  ) {
+    return 'suspendu';
   }
+
+  if (
+    ACTIVE_SUBSCRIPTION_STATUSES.includes(subStatus) &&
+    !SUSPENDED_STATUSES.includes(orgStatus)
+  ) {
+    return 'active';
+  }
+
+  if (TRIAL_SUBSCRIPTION_STATUSES.includes(subStatus)) {
+    return 'trial';
+  }
+
+  if (
+    subStatus === 'expired' ||
+    orgStatus === 'expired'
+  ) {
+    return 'expired';
+  }
+
+  if (
+    PENDING_STATUSES.includes(subStatus) ||
+    PENDING_STATUSES.includes(orgStatus) ||
+    orgStatus === 'pending'
+  ) {
+    return 'pending';
+  }
+
+  return 'pending';
 }
 
 function getTier(
-  prospectorCount: number,
+  prospectorCount: number
 ): EnterpriseRow['tier'] {
   if (prospectorCount >= 20) {
     return 'Entreprise';
@@ -100,615 +237,833 @@ function getTier(
   return 'Démarrage';
 }
 
-async function ensureSuperAdmin(): Promise<{
-  authorized: boolean;
-  userId: string | null;
-}> {
+function formatMoney(
+  amount: number,
+  currency = 'XOF'
+): string {
+  const safeAmount = Number.isFinite(amount) ? amount : 0;
+
   try {
-    const supabase = createClient();
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
-
-    if (userError || !user) {
-      return {
-        authorized: false,
-        userId: null,
-      };
-    }
-
-    const { data: superAdmin, error: superAdminError } = await supabase
-      .from('super_admins')
-      .select('id, status, actif')
-      .eq('user_id', user.id)
-      .maybeSingle();
-
-    if (superAdminError || !superAdmin) {
-      return {
-        authorized: false,
-        userId: user.id,
-      };
-    }
-
-    const active =
-      superAdmin.status === 'active' &&
-      superAdmin.actif !== false;
-
-    return {
-      authorized: active,
-      userId: user.id,
-    };
-  } catch (error) {
-    console.error('ensureSuperAdmin error:', error);
-
-    return {
-      authorized: false,
-      userId: null,
-    };
+    return new Intl.NumberFormat('fr-FR', {
+      style: 'currency',
+      currency,
+      maximumFractionDigits: currency === 'XOF' ? 0 : 2,
+    }).format(safeAmount);
+  } catch {
+    return `${safeAmount.toLocaleString('fr-FR')} ${currency}`;
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Fetch all organizations
-// Compatible avec les anciens composants utilisant fetchAllEnterprises()
-// ─────────────────────────────────────────────────────────────────────────────
+function getStartOfCurrentMonth(): string {
+  const now = new Date();
 
-export async function fetchAllEnterprises(): Promise<EnterpriseRow[]> {
-  try {
-    const supabase = createClient();
-    const { authorized } = await ensureSuperAdmin();
+  return new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    1,
+    0,
+    0,
+    0,
+    0
+  ).toISOString();
+}
 
-    if (!authorized) {
-      console.error('fetchAllEnterprises: accès SUPER ADMIN refusé.');
-      return [];
-    }
+function getTodayStart(): string {
+  const now = new Date();
 
-    const { data: organizations, error: organizationsError } =
-      await supabase
-        .from('organizations')
-        .select(`
-          id,
-          name,
-          email,
-          status,
-          subscription_status,
-          created_at
-        `)
-        .order('created_at', { ascending: false });
+  return new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+    0,
+    0,
+    0,
+    0
+  ).toISOString();
+}
 
-    if (organizationsError) {
-      console.error(
-        'fetchAllEnterprises organizations error:',
-        organizationsError.message,
-      );
-      return [];
-    }
+/* =========================================================
+   SECURITY — SUPER ADMIN
+========================================================= */
 
-    if (!organizations || organizations.length === 0) {
-      return [];
-    }
+async function ensureSuperAdmin(): Promise<{
+  userId: string;
+  email: string | null;
+}> {
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
 
-    const organizationIds = organizations.map(
-      (organization: any) => organization.id,
+  if (userError) {
+    throw new Error(
+      `Erreur de récupération de la session : ${userError.message}`
+    );
+  }
+
+  if (!user) {
+    throw new Error('Utilisateur non authentifié.');
+  }
+
+  const { data, error } = await supabase
+    .from('super_admins')
+    .select('user_id, status, actif')
+    .eq('user_id', user.id)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(
+      `Impossible de vérifier les droits SUPER ADMIN : ${error.message}`
+    );
+  }
+
+  if (!data) {
+    throw new Error(
+      'Accès refusé : cet utilisateur n’est pas SUPER ADMIN.'
+    );
+  }
+
+  if (String(data.status).toLowerCase() !== 'active') {
+    throw new Error(
+      'Accès refusé : le compte SUPER ADMIN est inactif.'
+    );
+  }
+
+  if (data.actif === false) {
+    throw new Error(
+      'Accès refusé : le compte SUPER ADMIN a été désactivé.'
+    );
+  }
+
+  return {
+    userId: user.id,
+    email: user.email ?? null,
+  };
+}
+
+/* =========================================================
+   ORGANISATIONS
+========================================================= */
+
+async function fetchOrganizations(): Promise<OrganizationRow[]> {
+  const { data, error } = await supabase
+    .from('organizations')
+    .select(
+      `
+        id,
+        name,
+        email,
+        status,
+        subscription_status,
+        created_at
+      `
+    )
+    .order('created_at', {
+      ascending: false,
+    });
+
+  if (error) {
+    throw new Error(
+      `Erreur lors du chargement des entreprises : ${error.message}`
+    );
+  }
+
+  return (data ?? []) as OrganizationRow[];
+}
+
+/* =========================================================
+   PROSPECTEURS
+========================================================= */
+
+async function fetchProspecteurs(): Promise<ProspecteurRow[]> {
+  const { data, error } = await supabase
+    .from('prospecteurs')
+    .select(
+      `
+        id,
+        organization_id,
+        status
+      `
     );
 
-    // ───────────────────────────────────────────────────────────────────────
-    // Prospecteurs
-    // ───────────────────────────────────────────────────────────────────────
+  if (error) {
+    throw new Error(
+      `Erreur lors du chargement des prospecteurs : ${error.message}`
+    );
+  }
 
-    const { data: prospecteurs, error: prospecteursError } =
-      await supabase
-        .from('prospecteurs')
-        .select(`
-          id,
-          organization_id,
-          status
-        `)
-        .in('organization_id', organizationIds);
+  return (data ?? []) as ProspecteurRow[];
+}
 
-    if (prospecteursError) {
-      console.error(
-        'fetchAllEnterprises prospecteurs error:',
-        prospecteursError.message,
-      );
-    }
+/* =========================================================
+   ABONNEMENTS
+========================================================= */
 
-    const prospectorsByOrganization = new Map<string, number>();
+async function fetchSubscriptions(): Promise<
+  OrganizationSubscriptionRow[]
+> {
+  const { data, error } = await supabase
+    .from('organization_subscriptions')
+    .select(
+      `
+        id,
+        organization_id,
+        plan_id,
+        status,
+        started_at,
+        expires_at,
+        created_at
+      `
+    )
+    .order('created_at', {
+      ascending: false,
+    });
 
-    for (const prospecteur of prospecteurs ?? []) {
-      const organizationId = prospecteur.organization_id;
+  if (error) {
+    throw new Error(
+      `Erreur lors du chargement des abonnements : ${error.message}`
+    );
+  }
 
-      if (!organizationId) {
-        continue;
-      }
+  return (data ?? []) as OrganizationSubscriptionRow[];
+}
 
-      prospectorsByOrganization.set(
-        organizationId,
-        (prospectorsByOrganization.get(organizationId) ?? 0) + 1,
-      );
-    }
+/* =========================================================
+   PLANS
+========================================================= */
 
-    // ───────────────────────────────────────────────────────────────────────
-    // Abonnements
-    // ───────────────────────────────────────────────────────────────────────
-
-    const { data: subscriptions, error: subscriptionsError } =
-      await supabase
-        .from('organization_subscriptions')
-        .select(`
-          id,
-          organization_id,
-          plan_id,
-          status,
-          started_at,
-          expires_at,
-          created_at
-        `)
-        .in('organization_id', organizationIds)
-        .order('created_at', { ascending: false });
-
-    if (subscriptionsError) {
-      console.error(
-        'fetchAllEnterprises subscriptions error:',
-        subscriptionsError.message,
-      );
-    }
-
-    const planIds = [
-      ...new Set(
-        (subscriptions ?? [])
-          .map((subscription: any) => subscription.plan_id)
-          .filter(Boolean),
-      ),
-    ];
-
-    // ───────────────────────────────────────────────────────────────────────
-    // Plans
-    // ───────────────────────────────────────────────────────────────────────
-
-    const { data: plans, error: plansError } =
-      planIds.length > 0
-        ? await supabase
-            .from('subscription_plans')
-            .select(`
-              id,
-              code,
-              name,
-              price,
-              currency,
-              duration_days
-            `)
-            .in('id', planIds)
-        : {
-            data: [],
-            error: null,
-          };
-
-    if (plansError) {
-      console.error(
-        'fetchAllEnterprises plans error:',
-        plansError.message,
-      );
-    }
-
-    const plansById = new Map<string, any>(
-      (plans ?? []).map((plan: any) => [plan.id, plan]),
+async function fetchSubscriptionPlans(): Promise<
+  SubscriptionPlanRow[]
+> {
+  const { data, error } = await supabase
+    .from('subscription_plans')
+    .select(
+      `
+        id,
+        code,
+        name,
+        price,
+        currency,
+        duration_days
+      `
     );
 
-    // Dernier abonnement par organisation
-    const latestSubscriptionByOrganization =
-      new Map<string, any>();
+  if (error) {
+    throw new Error(
+      `Erreur lors du chargement des plans : ${error.message}`
+    );
+  }
 
-    for (const subscription of subscriptions ?? []) {
-      if (
-        !latestSubscriptionByOrganization.has(
-          subscription.organization_id,
-        )
-      ) {
-        latestSubscriptionByOrganization.set(
-          subscription.organization_id,
-          subscription,
-        );
-      }
-    }
+  return (data ?? []) as SubscriptionPlanRow[];
+}
 
-    // ───────────────────────────────────────────────────────────────────────
-    // Paiements terrain / activité commerciale
-    // payments = paiements réellement encaissés
-    // ───────────────────────────────────────────────────────────────────────
+/* =========================================================
+   REVENUS TERRAIN
+   = paiements commerciaux réussis
+========================================================= */
 
-    const { data: payments, error: paymentsError } = await supabase
-      .from('payments')
-      .select(`
+async function fetchTerrainPayments(): Promise<PaymentRow[]> {
+  const { data, error } = await supabase
+    .from('payments')
+    .select(
+      `
         organization_id,
         amount,
-        status
-      `)
-      .in('organization_id', organizationIds)
-      .eq('status', 'successful');
+        currency,
+        status,
+        payment_date,
+        created_at
+      `
+    )
+    .in('status', SUCCESSFUL_PAYMENT_STATUSES);
 
-    if (paymentsError) {
-      console.error(
-        'fetchAllEnterprises payments error:',
-        paymentsError.message,
-      );
-    }
-
-    const terrainRevenueByOrganization =
-      new Map<string, number>();
-
-    for (const payment of payments ?? []) {
-      if (!payment.organization_id) {
-        continue;
-      }
-
-      terrainRevenueByOrganization.set(
-        payment.organization_id,
-        (terrainRevenueByOrganization.get(
-          payment.organization_id,
-        ) ?? 0) + Number(payment.amount ?? 0),
-      );
-    }
-
-    // ───────────────────────────────────────────────────────────────────────
-    // Paiements tokens journaliers
-    // ───────────────────────────────────────────────────────────────────────
-
-    const { data: dailyTokens, error: dailyTokensError } =
-      await supabase
-        .from('daily_tokens')
-        .select(`
-          organization_id,
-          paid_amount,
-          status
-        `)
-        .in('organization_id', organizationIds);
-
-    if (dailyTokensError) {
-      console.error(
-        'fetchAllEnterprises daily_tokens error:',
-        dailyTokensError.message,
-      );
-    }
-
-    const dailyRevenueByOrganization =
-      new Map<string, number>();
-
-    for (const token of dailyTokens ?? []) {
-      if (!token.organization_id) {
-        continue;
-      }
-
-      dailyRevenueByOrganization.set(
-        token.organization_id,
-        (dailyRevenueByOrganization.get(
-          token.organization_id,
-        ) ?? 0) + Number(token.paid_amount ?? 0),
-      );
-    }
-
-    // ───────────────────────────────────────────────────────────────────────
-    // Construction finale
-    // ───────────────────────────────────────────────────────────────────────
-
-    return organizations.map((organization: any) => {
-      const prospectorCount =
-        prospectorsByOrganization.get(organization.id) ?? 0;
-
-      const tier = getTier(prospectorCount);
-
-      const subscription =
-        latestSubscriptionByOrganization.get(organization.id);
-
-      const plan = subscription
-        ? plansById.get(subscription.plan_id)
-        : null;
-
-      const price = Number(plan?.price ?? 0);
-
-      const terrainRevenue =
-        terrainRevenueByOrganization.get(organization.id) ?? 0;
-
-      const dailyRevenue =
-        dailyRevenueByOrganization.get(organization.id) ?? 0;
-
-      return {
-        id: organization.id,
-
-        nom_entreprise:
-          organization.name || 'Entreprise sans nom',
-
-        status_abonnement:
-          normalizeSubscriptionStatus(
-            organization.subscription_status ||
-              organization.status,
-          ),
-
-        date_fin_abonnement:
-          subscription?.expires_at ?? null,
-
-        trial_start_date:
-          subscription?.status === 'trial'
-            ? subscription.started_at ?? null
-            : null,
-
-        trial_end_date:
-          subscription?.status === 'trial'
-            ? subscription.expires_at ?? null
-            : null,
-
-        created_at: organization.created_at,
-
-        ownerEmail:
-          organization.email || '—',
-
-        prospectorCount,
-
-        mrr:
-          price > 0
-            ? formatUsd(price)
-            : '—',
-
-        tier,
-
-        terrainRevenue,
-
-        dailyRevenue,
-      };
-    });
-  } catch (error) {
-    console.error(
-      'fetchAllEnterprises unexpected error:',
-      error,
+  if (error) {
+    throw new Error(
+      `Erreur lors du chargement des paiements terrain : ${error.message}`
     );
-
-    return [];
   }
+
+  return (data ?? []) as PaymentRow[];
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Activate / suspend organization
-// ─────────────────────────────────────────────────────────────────────────────
+/* =========================================================
+   TOKENS JOURNALIERS
+========================================================= */
+
+async function fetchDailyTokens(): Promise<DailyTokenRow[]> {
+  const { data, error } = await supabase
+    .from('daily_tokens')
+    .select(
+      `
+        organization_id,
+        paid_amount,
+        status,
+        token_date,
+        paid_at
+      `
+    );
+
+  if (error) {
+    throw new Error(
+      `Erreur lors du chargement des tokens journaliers : ${error.message}`
+    );
+  }
+
+  return (data ?? []) as DailyTokenRow[];
+}
+
+/* =========================================================
+   FETCH ALL ENTERPRISES
+========================================================= */
+
+export async function fetchAllEnterprises(): Promise<EnterpriseRow[]> {
+  await ensureSuperAdmin();
+
+  const [
+    organizations,
+    prospecteurs,
+    subscriptions,
+    plans,
+    payments,
+    dailyTokens,
+  ] = await Promise.all([
+    fetchOrganizations(),
+    fetchProspecteurs(),
+    fetchSubscriptions(),
+    fetchSubscriptionPlans(),
+    fetchTerrainPayments(),
+    fetchDailyTokens(),
+  ]);
+
+  /* -------------------------------------------------------
+     Nombre de prospecteurs par entreprise
+  ------------------------------------------------------- */
+
+  const prospecteurCountMap = new Map<string, number>();
+
+  for (const prospecteur of prospecteurs) {
+    const current =
+      prospecteurCountMap.get(prospecteur.organization_id) ?? 0;
+
+    prospecteurCountMap.set(
+      prospecteur.organization_id,
+      current + 1
+    );
+  }
+
+  /* -------------------------------------------------------
+     Dernier abonnement par entreprise
+  ------------------------------------------------------- */
+
+  const latestSubscriptionMap = new Map<
+    string,
+    OrganizationSubscriptionRow
+  >();
+
+  for (const subscription of subscriptions) {
+    const existing =
+      latestSubscriptionMap.get(subscription.organization_id);
+
+    if (!existing) {
+      latestSubscriptionMap.set(
+        subscription.organization_id,
+        subscription
+      );
+      continue;
+    }
+
+    const existingDate = new Date(
+      existing.created_at
+    ).getTime();
+
+    const currentDate = new Date(
+      subscription.created_at
+    ).getTime();
+
+    if (currentDate > existingDate) {
+      latestSubscriptionMap.set(
+        subscription.organization_id,
+        subscription
+      );
+    }
+  }
+
+  /* -------------------------------------------------------
+     Plans
+  ------------------------------------------------------- */
+
+  const planMap = new Map<
+    string,
+    SubscriptionPlanRow
+  >();
+
+  for (const plan of plans) {
+    planMap.set(plan.id, plan);
+  }
+
+  /* -------------------------------------------------------
+     Revenus terrain par entreprise
+  ------------------------------------------------------- */
+
+  const terrainRevenueMap = new Map<string, number>();
+
+  for (const payment of payments) {
+    if (!isSuccessfulPayment(payment.status)) {
+      continue;
+    }
+
+    const amount = toNumber(payment.amount);
+
+    const current =
+      terrainRevenueMap.get(payment.organization_id) ?? 0;
+
+    terrainRevenueMap.set(
+      payment.organization_id,
+      current + amount
+    );
+  }
+
+  /* -------------------------------------------------------
+     Tokens du jour uniquement
+  ------------------------------------------------------- */
+
+  const today = new Date().toISOString().slice(0, 10);
+
+  const dailyRevenueMap = new Map<string, number>();
+
+  for (const token of dailyTokens) {
+    if (token.token_date !== today) {
+      continue;
+    }
+
+    const amount = toNumber(token.paid_amount);
+
+    const current =
+      dailyRevenueMap.get(token.organization_id) ?? 0;
+
+    dailyRevenueMap.set(
+      token.organization_id,
+      current + amount
+    );
+  }
+
+  /* -------------------------------------------------------
+     Construction finale
+  ------------------------------------------------------- */
+
+  return organizations.map((organization) => {
+    const subscription =
+      latestSubscriptionMap.get(organization.id);
+
+    const plan = subscription
+      ? planMap.get(subscription.plan_id)
+      : undefined;
+
+    const prospectorCount =
+      prospecteurCountMap.get(organization.id) ?? 0;
+
+    const status = normalizeSubscriptionStatus(
+      organization.status,
+      subscription?.status ??
+        organization.subscription_status
+    );
+
+    const currency =
+      plan?.currency ||
+      'XOF';
+
+    const mrr = plan
+      ? formatMoney(
+          toNumber(plan.price),
+          currency
+        )
+      : formatMoney(0, currency);
+
+    return {
+      id: organization.id,
+
+      nom_entreprise:
+        organization.name || 'Entreprise sans nom',
+
+      status_abonnement: status,
+
+      date_fin_abonnement:
+        subscription?.expires_at ?? null,
+
+      trial_start_date:
+        status === 'trial'
+          ? subscription?.started_at ?? null
+          : null,
+
+      trial_end_date:
+        status === 'trial'
+          ? subscription?.expires_at ?? null
+          : null,
+
+      created_at:
+        organization.created_at,
+
+      ownerEmail:
+        organization.email ?? 'Non renseigné',
+
+      prospectorCount,
+
+      mrr,
+
+      tier:
+        getTier(prospectorCount),
+
+      terrainRevenue:
+        terrainRevenueMap.get(
+          organization.id
+        ) ?? 0,
+
+      dailyRevenue:
+        dailyRevenueMap.get(
+          organization.id
+        ) ?? 0,
+    };
+  });
+}
+
+/* =========================================================
+   ACTIVER / SUSPENDRE UNE ENTREPRISE
+========================================================= */
 
 export async function toggleEnterpriseStatus(
   enterpriseId: string,
-  action: 'activate' | 'suspend',
-): Promise<{
-  success: boolean;
-  error?: string;
-}> {
-  try {
-    const supabase = createClient();
-    const { authorized } = await ensureSuperAdmin();
+  action: 'activate' | 'suspend'
+): Promise<void> {
+  await ensureSuperAdmin();
 
-    if (!authorized) {
-      return {
-        success: false,
-        error: 'Accès SUPER ADMIN refusé.',
-      };
-    }
-
-    const newStatus =
-      action === 'activate' ?'active' :'suspended';
-
-    const { error } = await supabase
-      .from('organizations')
-      .update({
-        status: newStatus,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', enterpriseId);
-
-    if (error) {
-      console.error(
-        'toggleEnterpriseStatus error:',
-        error.message,
-      );
-
-      return {
-        success: false,
-        error: error.message,
-      };
-    }
-
-    return {
-      success: true,
-    };
-  } catch (error) {
-    console.error(
-      'toggleEnterpriseStatus unexpected error:',
-      error,
+  if (!enterpriseId) {
+    throw new Error(
+      'Identifiant entreprise manquant.'
     );
+  }
 
-    return {
-      success: false,
-      error:
-        error instanceof Error
-          ? error.message
-          : 'Erreur inconnue.',
-    };
+  const newStatus =
+    action === 'activate'
+      ? 'active'
+      : 'suspended';
+
+  const { error } = await supabase
+    .from('organizations')
+    .update({
+      status: newStatus,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', enterpriseId);
+
+  if (error) {
+    throw new Error(
+      `Impossible de modifier le statut de l’entreprise : ${error.message}`
+    );
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// SUPER ADMIN KPIs
-// ─────────────────────────────────────────────────────────────────────────────
+/* =========================================================
+   KPI SUPER ADMIN
+========================================================= */
 
 export async function fetchSuperAdminKPIs(): Promise<SuperAdminKPIs> {
-  try {
-    const supabase = createClient();
-    const { authorized } = await ensureSuperAdmin();
+  await ensureSuperAdmin();
 
-    if (!authorized) {
-      return emptySuperAdminKPIs();
-    }
-
-    const { data, error } = await supabase
-      .from('organizations')
-      .select(`
+  const { data, error } = await supabase
+    .from('organizations')
+    .select(
+      `
         id,
         status,
         subscription_status
-      `);
-
-    if (error || !data) {
-      console.error(
-        'fetchSuperAdminKPIs error:',
-        error?.message,
-      );
-
-      return emptySuperAdminKPIs();
-    }
-
-    const active = data.filter(
-      (organization: any) =>
-        organization.status === 'active' &&
-        organization.subscription_status === 'active',
-    ).length;
-
-    const suspended = data.filter(
-      (organization: any) =>
-        organization.status === 'suspended' ||
-        organization.status === 'blocked',
-    ).length;
-
-    const pending = data.filter(
-      (organization: any) =>
-        organization.status === 'pending' ||
-        organization.status === 'trial' ||
-        organization.status === 'expired' ||
-        organization.subscription_status === 'inactive' ||
-        organization.subscription_status === 'past_due' ||
-        organization.subscription_status === 'cancelled' ||
-        organization.subscription_status === 'expired',
-    ).length;
-
-    return {
-      total: data.length,
-      active,
-      suspended,
-      pending,
-    };
-  } catch (error) {
-    console.error(
-      'fetchSuperAdminKPIs unexpected error:',
-      error,
+      `
     );
 
-    return emptySuperAdminKPIs();
+  if (error) {
+    throw new Error(
+      `Erreur lors du calcul des KPI : ${error.message}`
+    );
   }
-}
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Financial analytics
-//
-// Ici, le chiffre d'affaires SUPER ADMIN correspond aux abonnements
-// effectivement payés par les entreprises.
-// ─────────────────────────────────────────────────────────────────────────────
+  const organizations =
+    data ?? [];
 
-export async function fetchFinancialAnalytics(): Promise<FinancialAnalytics> {
-  try {
-    const supabase = createClient();
-    const { authorized } = await ensureSuperAdmin();
+  if (organizations.length === 0) {
+    return emptyKPIs();
+  }
 
-    if (!authorized) {
-      return emptyFinancialAnalytics();
+  const result = emptyKPIs();
+
+  result.total =
+    organizations.length;
+
+  for (const organization of organizations) {
+    const organizationStatus =
+      String(
+        organization.status ?? ''
+      ).toLowerCase();
+
+    const subscriptionStatus =
+      String(
+        organization.subscription_status ?? ''
+      ).toLowerCase();
+
+    /* SUSPENDU */
+    if (
+      SUSPENDED_STATUSES.includes(
+        organizationStatus
+      ) ||
+      SUSPENDED_STATUSES.includes(
+        subscriptionStatus
+      )
+    ) {
+      result.suspended++;
+      continue;
     }
 
-    const now = new Date();
+    /* ACTIF */
+    if (
+      organizationStatus === 'active' &&
+      subscriptionStatus === 'active'
+    ) {
+      result.active++;
+      continue;
+    }
 
-    const startOfMonth = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      1,
-    ).toISOString();
+    /* PENDING / TRIAL / EXPIRED */
+    result.pending++;
+  }
 
-    // ───────────────────────────────────────────────────────────────────────
-    // Paiements d'abonnements
-    // ───────────────────────────────────────────────────────────────────────
+  return result;
+}
 
-    const { data: payments, error: paymentsError } =
-      await supabase
-        .from('subscription_payments')
-        .select(`
-          id,
+/* =========================================================
+   ANALYTICS FINANCIÈRES
+   Revenus des abonnements JDV CRM
+========================================================= */
+
+export async function fetchFinancialAnalytics(): Promise<FinancialAnalytics> {
+  await ensureSuperAdmin();
+
+  const [
+    subscriptionPaymentsResult,
+    subscriptionsResult,
+  ] = await Promise.all([
+    supabase
+      .from('subscription_payments')
+      .select(
+        `
           amount,
+          currency,
           status,
           paid_at,
           created_at
-        `)
-        .eq('status', 'successful')
-        .order('created_at', {
-          ascending: false,
-        });
+        `
+      )
+      .in(
+        'status',
+        SUCCESSFUL_PAYMENT_STATUSES
+      ),
 
-    if (paymentsError) {
-      console.error(
-        'fetchFinancialAnalytics subscription payments error:',
-        paymentsError.message,
-      );
+    supabase
+      .from('organization_subscriptions')
+      .select(
+        `
+          id,
+          status
+        `
+      ),
+  ]);
+
+  if (subscriptionPaymentsResult.error) {
+    throw new Error(
+      `Erreur lors du chargement des revenus d’abonnement : ${subscriptionPaymentsResult.error.message}`
+    );
+  }
+
+  if (subscriptionsResult.error) {
+    throw new Error(
+      `Erreur lors du chargement des abonnements actifs : ${subscriptionsResult.error.message}`
+    );
+  }
+
+  const payments =
+    (subscriptionPaymentsResult.data ??
+      []) as SubscriptionPaymentRow[];
+
+  const subscriptions =
+    subscriptionsResult.data ?? [];
+
+  const analytics =
+    emptyFinancialAnalytics();
+
+  const startOfMonth =
+    getStartOfCurrentMonth();
+
+  /* -------------------------------------------------------
+     Revenus abonnements
+  ------------------------------------------------------- */
+
+  for (const payment of payments) {
+    if (
+      !isSuccessfulPayment(
+        payment.status
+      )
+    ) {
+      continue;
     }
 
-    const successfulPayments = payments ?? [];
+    const amount =
+      toNumber(payment.amount);
 
-    const totalRevenue =
-      successfulPayments.reduce(
-        (sum: number, payment: any) =>
-          sum + Number(payment.amount ?? 0),
-        0,
-      );
+    analytics.totalRevenue +=
+      amount;
 
-    const monthlyRevenue =
-      successfulPayments
-        .filter((payment: any) => {
-          const date =
-            payment.paid_at ||
-            payment.created_at;
+    const paymentDate =
+      payment.paid_at ||
+      payment.created_at;
 
-          return Boolean(
-            date && date >= startOfMonth,
-          );
-        })
-        .reduce(
-          (sum: number, payment: any) =>
-            sum + Number(payment.amount ?? 0),
-          0,
-        );
-
-    // ───────────────────────────────────────────────────────────────────────
-    // Abonnements actifs
-    // ───────────────────────────────────────────────────────────────────────
-
-    const { count: activeSubscriptions, error: subscriptionsError } =
-      await supabase
-        .from('organization_subscriptions')
-        .select('id', {
-          count: 'exact',
-          head: true,
-        })
-        .eq('status', 'active');
-
-    if (subscriptionsError) {
-      console.error(
-        'fetchFinancialAnalytics subscriptions error:',
-        subscriptionsError.message,
-      );
+    if (
+      paymentDate &&
+      new Date(paymentDate) >=
+        new Date(startOfMonth)
+    ) {
+      analytics.monthlyRevenue +=
+        amount;
     }
 
-    return {
-      totalRevenue,
-      monthlyRevenue,
-      paymentCount: successfulPayments.length,
-      activeSubscriptions:
-        activeSubscriptions ?? 0,
-    };
-  } catch (error) {
-    console.error(
-      'fetchFinancialAnalytics unexpected error:',
-      error,
+    analytics.paymentCount++;
+  }
+
+  /* -------------------------------------------------------
+     Abonnements actifs
+  ------------------------------------------------------- */
+
+  analytics.activeSubscriptions =
+    subscriptions.filter(
+      (subscription) =>
+        String(
+          subscription.status ?? ''
+        ).toLowerCase() === 'active'
+    ).length;
+
+  return analytics;
+}
+
+/* =========================================================
+   REVENUS TERRAIN DU JOUR
+========================================================= */
+
+export async function fetchTodayTerrainRevenue(): Promise<number> {
+  await ensureSuperAdmin();
+
+  const todayStart =
+    getTodayStart();
+
+  const { data, error } = await supabase
+    .from('payments')
+    .select(
+      `
+        amount,
+        status,
+        payment_date
+      `
+    )
+    .gte(
+      'payment_date',
+      todayStart
+    )
+    .in(
+      'status',
+      SUCCESSFUL_PAYMENT_STATUSES
     );
 
-    return emptyFinancialAnalytics();
+  if (error) {
+    throw new Error(
+      `Erreur lors du calcul du revenu terrain du jour : ${error.message}`
+    );
   }
+
+  return (data ?? []).reduce(
+    (total, payment) =>
+      total +
+      toNumber(payment.amount),
+    0
+  );
+}
+
+/* =========================================================
+   REVENUS TOKENS DU JOUR
+========================================================= */
+
+export async function fetchTodayDailyTokenRevenue(): Promise<number> {
+  await ensureSuperAdmin();
+
+  const today =
+    new Date()
+      .toISOString()
+      .slice(0, 10);
+
+  const { data, error } = await supabase
+    .from('daily_tokens')
+    .select(
+      `
+        paid_amount,
+        token_date,
+        status
+      `
+    )
+    .eq(
+      'token_date',
+      today
+    );
+
+  if (error) {
+    throw new Error(
+      `Erreur lors du calcul des tokens du jour : ${error.message}`
+    );
+  }
+
+  return (data ?? []).reduce(
+    (total, token) =>
+      total +
+      toNumber(token.paid_amount),
+    0
+  );
+}
+
+/* =========================================================
+   EXPORT D'UN SNAPSHOT COMPLET DU DASHBOARD
+========================================================= */
+
+export async function fetchSuperAdminDashboard(): Promise<{
+  kpis: SuperAdminKPIs;
+  enterprises: EnterpriseRow[];
+  financial: FinancialAnalytics;
+  todayTerrainRevenue: number;
+  todayDailyTokenRevenue: number;
+}> {
+  await ensureSuperAdmin();
+
+  const [
+    kpis,
+    enterprises,
+    financial,
+    todayTerrainRevenue,
+    todayDailyTokenRevenue,
+  ] = await Promise.all([
+    fetchSuperAdminKPIs(),
+    fetchAllEnterprises(),
+    fetchFinancialAnalytics(),
+    fetchTodayTerrainRevenue(),
+    fetchTodayDailyTokenRevenue(),
+  ]);
+
+  return {
+    kpis,
+    enterprises,
+    financial,
+    todayTerrainRevenue,
+    todayDailyTokenRevenue,
+  };
 }
