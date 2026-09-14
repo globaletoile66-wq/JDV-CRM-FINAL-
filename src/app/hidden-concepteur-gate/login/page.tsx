@@ -203,102 +203,60 @@ export default function ConcepteurLoginPage() {
        * On utilise un tableau au lieu de maybeSingle()
        * afin de voir exactement ce que Supabase retourne.
        */
-      const {
-        data: superAdmins,
-        error: superAdminError,
-      } = await supabase
-        .from('super_admins')
-        .select(
-          'id, user_id, status, actif'
-        )
-        .eq(
-          'user_id',
-          authenticatedUserId
-        );
+/**
+ * --------------------------------------------------------
+ * 6. VÉRIFICATION SÉCURISÉE DU SUPER ADMIN
+ * --------------------------------------------------------
+ *
+ * La vérification est effectuée par PostgreSQL.
+ * Le frontend ne lit plus directement super_admins.
+ */
+const {
+  data: isSuperAdmin,
+  error: superAdminError,
+} = await supabase.rpc(
+  'verify_current_super_admin'
+);
 
-      console.log(
-        'SUPER ADMIN DATA =',
-        superAdmins
-      );
+console.log(
+  'SUPER ADMIN RPC RESULT =',
+  isSuperAdmin
+);
 
-      console.log(
-        'SUPER ADMIN ERROR =',
-        superAdminError
-      );
+console.log(
+  'SUPER ADMIN RPC ERROR =',
+  superAdminError
+);
 
-      /**
-       * --------------------------------------------------------
-       * 7. ERREUR DE LECTURE DE LA TABLE
-       * --------------------------------------------------------
-       */
-      if (superAdminError) {
-        console.error(
-          'ERREUR LECTURE super_admins =',
-          superAdminError
-        );
+if (superAdminError) {
+  console.error(
+    'ERREUR RPC SUPER ADMIN =',
+    superAdminError
+  );
 
-        await supabase.auth.signOut();
+  await supabase.auth.signOut();
 
-        throw new Error(
-          `Erreur lors de la vérification des droits SUPER ADMIN : ${superAdminError.message}`
-        );
-      }
+  throw new Error(
+    `Erreur de vérification SUPER ADMIN : ${superAdminError.message}`
+  );
+}
 
-      /**
-       * --------------------------------------------------------
-       * 8. AUCUNE LIGNE TROUVÉE
-       * --------------------------------------------------------
-       */
-      if (
-        !superAdmins ||
-        superAdmins.length === 0
-      ) {
-        console.error(
-          'AUCUN SUPER ADMIN TROUVÉ POUR UID =',
-          authenticatedUserId
-        );
+if (isSuperAdmin !== true) {
+  console.error(
+    'SUPER ADMIN NON AUTORISÉ POUR UID =',
+    authenticatedUserId
+  );
 
-        await supabase.auth.signOut();
+  await supabase.auth.signOut();
 
-        throw new Error(
-          `Aucune ligne SUPER ADMIN visible pour l’UID ${authenticatedUserId}.`
-        );
-      }
+  throw new Error(
+    `Accès refusé. L’UID ${authenticatedUserId} n’est pas reconnu comme SUPER ADMIN actif.`
+  );
+}
 
-      /**
-       * --------------------------------------------------------
-       * 9. RÉCUPÉRATION DU SUPER ADMIN
-       * --------------------------------------------------------
-       */
-      const superAdmin = superAdmins[0];
-
-      console.log(
-        'SUPER ADMIN VÉRIFIÉ =',
-        superAdmin
-      );
-
-      /**
-       * --------------------------------------------------------
-       * 10. VÉRIFICATION DU STATUT
-       * --------------------------------------------------------
-       */
-      if (
-        superAdmin.status !== 'active'
-      ) {
-        await supabase.auth.signOut();
-
-        throw new Error(
-          'Accès refusé. Le compte SUPER ADMIN est actuellement inactif.'
-        );
-      }
-
-      /**
-       * --------------------------------------------------------
-       * 11. VÉRIFICATION ACTIF
-       * --------------------------------------------------------
-       */
-      if (
-        superAdmin.actif !== true
+console.log(
+  'SUPER ADMIN VALIDÉ PAR SUPABASE'
+);
       ) {
         await supabase.auth.signOut();
 
