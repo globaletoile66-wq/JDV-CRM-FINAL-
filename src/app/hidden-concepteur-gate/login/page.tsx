@@ -274,7 +274,50 @@ export default function ConcepteurLoginPage() {
 
       const authenticatedUserId =
         authData.user.id;
+console.log(
+  '=== JDV CRM — SESSION APRÈS AUTH ==='
+);
 
+console.log(
+  'ACCESS TOKEN PRÉSENT =',
+  !!authData.session?.access_token
+);
+
+console.log(
+  'REFRESH TOKEN PRÉSENT =',
+  !!authData.session?.refresh_token
+);
+
+console.log(
+  'USER ID =',
+  authData.user.id
+);
+
+console.log(
+  '===================================='
+);
+
+if (authData.session) {
+  const {
+    error: setSessionError,
+  } = await supabase.auth.setSession({
+    access_token: authData.session.access_token,
+    refresh_token: authData.session.refresh_token,
+  });
+
+  console.log(
+    'SET SESSION ERROR =',
+    setSessionError
+  );
+
+  if (setSessionError) {
+    setErrorMessage(
+      `Impossible de finaliser la session Supabase : ${setSessionError.message}`
+    );
+
+    return;
+  }
+}
       /*
        * --------------------------------------------------------
        * 4. VÉRIFICATION UID
