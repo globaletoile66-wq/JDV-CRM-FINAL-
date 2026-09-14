@@ -239,20 +239,86 @@ export default function ConcepteurLoginPage() {
        * La politique RLS super_admins_select_own
        * autorise l'utilisateur à lire sa propre ligne.
        */
-      const {
-        data: superAdmin,
-        error: superAdminError,
-      } =
-        await supabase
-          .from('super_admins')
-          .select(
-            'user_id, status, actif'
-          )
-          .eq(
-            'user_id',
-            authenticatedUserId
-          )
-          .maybeSingle();
+const {
+  data: superAdminResult,
+  error: superAdminError,
+} = await supabase.rpc(
+  'verify_current_super_admin'
+);
+
+console.log(
+  '=== JDV CRM — VÉRIFICATION SUPER ADMIN ==='
+);
+
+console.log(
+  'AUTH USER ID =',
+  authenticatedUserId
+);
+
+console.log(
+  'SUPER ADMIN RESULT =',
+  superAdminResult
+);
+
+console.log(
+  'SUPER ADMIN ERROR =',
+  superAdminError
+);
+
+console.log(
+  '=========================================='
+);
+
+if (superAdminError) {
+  console.error(
+    'Erreur vérification SUPER ADMIN :',
+    superAdminError
+  );
+
+  setErrorMessage(
+    `Impossible de vérifier les droits SUPER ADMIN : ${superAdminError.message}`
+  );
+
+  return;
+}
+
+const superAdmin = Array.isArray(superAdminResult)
+  ? superAdminResult[0]
+  : superAdminResult;
+
+if (
+  !superAdmin ||
+  superAdmin.is_super_admin !== true
+) {
+  await supabase.auth.signOut();
+
+  setErrorMessage(
+    "Accès refusé. Votre compte Supabase est authentifié, mais aucune autorisation SUPER ADMIN active n’a été trouvée."
+  );
+
+  return;
+}
+
+console.log(
+  'JDV CRM — SUPER ADMIN VALIDÉ',
+  {
+    userId: superAdmin.user_id,
+    status: superAdmin.status,
+    actif: superAdmin.actif,
+  }
+);
+
+setSuccessMessage(
+  'Connexion SUPER ADMIN réussie. Ouverture du tableau de bord…'
+);
+
+await new Promise((resolve) =>
+  setTimeout(resolve, 500)
+);
+
+router.replace(
+  '/hidden-concepteur-gate/dashboard'
+);   
 
       console.log(
         '=========================================='
