@@ -15,6 +15,13 @@ const AUTHORIZED_CONCEPTEURS = [
   },
 ];
 
+type SuperAdminResult = {
+  is_super_admin: boolean;
+  user_id: string | null;
+  status: string | null;
+  actif: boolean;
+};
+
 export default function ConcepteurLoginPage() {
   const router = useRouter();
   const supabase = createClient();
@@ -30,43 +37,48 @@ export default function ConcepteurLoginPage() {
   const [successMessage, setSuccessMessage] = useState('');
 
   /*
-   * Vérification d'une session existante.
+   * ============================================================
+   * SESSION EXISTANTE
+   * ============================================================
    */
   useEffect(() => {
     let mounted = true;
 
     const checkExistingSession = async () => {
       try {
-        const { data, error } =
-          await supabase.auth.getSession();
+        const {
+          data: { session },
+          error,
+        } = await supabase.auth.getSession();
 
         console.log(
           '=== JDV CRM — SESSION EXISTANTE ==='
         );
+
         console.log(
           'SESSION USER ID =',
-          data.session?.user?.id ?? null
+          session?.user?.id ?? null
         );
+
         console.log(
           'SESSION EMAIL =',
-          data.session?.user?.email ?? null
+          session?.user?.email ?? null
         );
+
         console.log(
           'SESSION ERROR =',
           error ?? null
         );
+
         console.log(
           '==================================='
         );
 
-        if (!mounted) return;
-
-        if (!data.session?.user) {
+        if (!mounted || !session?.user) {
           return;
         }
 
-        const sessionUserId =
-          data.session.user.id;
+        const sessionUserId = session.user.id;
 
         const authorized =
           AUTHORIZED_CONCEPTEURS.some(
@@ -74,7 +86,51 @@ export default function ConcepteurLoginPage() {
               account.userId === sessionUserId
           );
 
-        if (authorized) {
+        if (!authorized) {
+          return;
+        }
+
+        /*
+         * Vérification réelle du SUPER ADMIN
+         * avant de rediriger.
+         */
+        const {
+          data: rpcData,
+          error: rpcError,
+        } = await supabase.rpc(
+          'verify_current_super_admin'
+        );
+
+        console.log(
+          '=== JDV CRM — SESSION SUPER ADMIN ==='
+        );
+
+        console.log(
+          'RPC DATA =',
+          rpcData
+        );
+
+        console.log(
+          'RPC ERROR =',
+          rpcError
+        );
+
+        console.log(
+          '======================================'
+        );
+
+        if (rpcError) {
+          return;
+        }
+
+        const result = Array.isArray(rpcData)
+          ? rpcData[0]
+          : rpcData;
+
+        if (
+          result?.is_super_admin === true &&
+          result?.user_id === sessionUserId
+        ) {
           router.replace(
             '/hidden-concepteur-gate/dashboard'
           );
@@ -95,7 +151,9 @@ export default function ConcepteurLoginPage() {
   }, [router, supabase]);
 
   /*
+   * ============================================================
    * CONNEXION SUPER ADMIN
+   * ============================================================
    */
   const handleLogin = async (
     event: FormEvent<HTMLFormElement>
@@ -111,9 +169,9 @@ export default function ConcepteurLoginPage() {
 
     try {
       /*
-       * -----------------------------------------------------
-       * 1. Vérification des champs
-       * -----------------------------------------------------
+       * --------------------------------------------------------
+       * 1. VALIDATION DES CHAMPS
+       * --------------------------------------------------------
        */
       if (!normalizedEmail || !password) {
         setErrorMessage(
@@ -123,9 +181,9 @@ export default function ConcepteurLoginPage() {
       }
 
       /*
-       * -----------------------------------------------------
-       * 2. Vérification de l'e-mail autorisé
-       * -----------------------------------------------------
+       * --------------------------------------------------------
+       * 2. VÉRIFICATION DE L'EMAIL AUTORISÉ
+       * --------------------------------------------------------
        */
       const authorizedAccount =
         AUTHORIZED_CONCEPTEURS.find(
@@ -142,10 +200,27 @@ export default function ConcepteurLoginPage() {
       }
 
       /*
-       * -----------------------------------------------------
+       * --------------------------------------------------------
        * 3. AUTHENTIFICATION SUPABASE
-       * -----------------------------------------------------
+       * --------------------------------------------------------
        */
+      console.log(
+        '=========================================='
+      );
+
+      console.log(
+        'JDV CRM — TENTATIVE AUTHENTIFICATION'
+      );
+
+      console.log(
+        'EMAIL SAISI =',
+        normalizedEmail
+      );
+
+      console.log(
+        '=========================================='
+      );
+
       const {
         data: authData,
         error: authError,
@@ -158,21 +233,26 @@ export default function ConcepteurLoginPage() {
       console.log(
         '=========================================='
       );
+
       console.log(
-        'JDV CRM — AUTHENTIFICATION'
+        'JDV CRM — RÉSULTAT AUTHENTIFICATION'
       );
+
       console.log(
         'AUTH USER ID =',
         authData.user?.id ?? null
       );
+
       console.log(
         'AUTH EMAIL =',
         authData.user?.email ?? null
       );
+
       console.log(
         'AUTH ERROR =',
         authError ?? null
       );
+
       console.log(
         '=========================================='
       );
@@ -196,236 +276,285 @@ export default function ConcepteurLoginPage() {
         authData.user.id;
 
       /*
-       * -----------------------------------------------------
-       * 4. VÉRIFICATION DE L'UID
-       * -----------------------------------------------------
+       * --------------------------------------------------------
+       * 4. VÉRIFICATION UID
+       * --------------------------------------------------------
        */
+      console.log(
+        '=== JDV CRM — VÉRIFICATION UID ==='
+      );
+
+      console.log(
+        'UID AUTHENTIFIÉ =',
+        authenticatedUserId
+      );
+
+      console.log(
+        'UID AUTORISÉ =',
+        authorizedAccount.userId
+      );
+
+      console.log(
+        'UID CORRESPOND =',
+        authenticatedUserId ===
+          authorizedAccount.userId
+      );
+
+      console.log(
+        '=================================='
+      );
+
       if (
         authenticatedUserId !==
         authorizedAccount.userId
       ) {
-        console.error(
-          'UID non autorisé',
-          {
-            authenticatedUserId,
-            authorizedUserId:
-              authorizedAccount.userId,
-          }
-        );
-
         await supabase.auth.signOut();
 
         setErrorMessage(
-          `Accès refusé. L’UID ${authenticatedUserId} ne correspond pas au compte SUPER ADMIN autorisé.`
+          `Accès refusé : l'UID Supabase (${authenticatedUserId}) ne correspond pas à l'UID SUPER ADMIN autorisé (${authorizedAccount.userId}).`
         );
 
         return;
       }
 
+      /*
+       * --------------------------------------------------------
+       * 5. VÉRIFICATION SUPER ADMIN PAR RPC
+       * --------------------------------------------------------
+       */
       console.log(
-        'UID SUPER ADMIN CORRECT =',
+        '=========================================='
+      );
+
+      console.log(
+        'JDV CRM — APPEL RPC SUPER ADMIN'
+      );
+
+      console.log(
+        'Fonction = verify_current_super_admin'
+      );
+
+      console.log(
+        'UID AUTH =',
         authenticatedUserId
       );
 
-      /*
-       * -----------------------------------------------------
-       * 5. VÉRIFICATION DIRECTE DANS super_admins
-       * -----------------------------------------------------
-       *
-       * Pas de RPC.
-       * Pas de SECURITY DEFINER.
-       * Pas de service_role.
-       *
-       * La politique RLS super_admins_select_own
-       * autorise l'utilisateur à lire sa propre ligne.
-       */
-const {
-  data: superAdminResult,
-  error: superAdminError,
-} = await supabase.rpc(
-  'verify_current_super_admin'
-);
+      console.log(
+        '=========================================='
+      );
 
-console.log(
-  '=== JDV CRM — VÉRIFICATION SUPER ADMIN ==='
-);
-
-console.log(
-  'AUTH USER ID =',
-  authenticatedUserId
-);
-
-console.log(
-  'SUPER ADMIN RESULT =',
-  superAdminResult
-);
-
-console.log(
-  'SUPER ADMIN ERROR =',
-  superAdminError
-);
-
-console.log(
-  '=========================================='
-);
-
-if (superAdminError) {
-  console.error(
-    'Erreur vérification SUPER ADMIN :',
-    superAdminError
-  );
-
-  setErrorMessage(
-    `Impossible de vérifier les droits SUPER ADMIN : ${superAdminError.message}`
-  );
-
-  return;
-}
-
-const superAdmin = Array.isArray(superAdminResult)
-  ? superAdminResult[0]
-  : superAdminResult;
-
-if (
-  !superAdmin ||
-  superAdmin.is_super_admin !== true
-) {
-  await supabase.auth.signOut();
-
-  setErrorMessage(
-    "Accès refusé. Votre compte Supabase est authentifié, mais aucune autorisation SUPER ADMIN active n’a été trouvée."
-  );
-
-  return;
-}
-
-console.log(
-  'JDV CRM — SUPER ADMIN VALIDÉ',
-  {
-    userId: superAdmin.user_id,
-    status: superAdmin.status,
-    actif: superAdmin.actif,
-  }
-);
-
-setSuccessMessage(
-  'Connexion SUPER ADMIN réussie. Ouverture du tableau de bord…'
-);
-
-await new Promise((resolve) =>
-  setTimeout(resolve, 500)
-);
-
-router.replace(
-  '/hidden-concepteur-gate/dashboard'
-);   
+      const {
+        data: rpcData,
+        error: rpcError,
+      } = await supabase.rpc(
+        'verify_current_super_admin'
+      );
 
       console.log(
         '=========================================='
       );
+
       console.log(
-        'JDV CRM — VÉRIFICATION SUPER ADMIN'
+        'JDV CRM — RÉSULTAT RPC SUPER ADMIN'
       );
+
       console.log(
-        'SUPER ADMIN DATA =',
-        superAdmin
+        'RPC DATA =',
+        rpcData
       );
+
       console.log(
-        'SUPER ADMIN ERROR =',
-        superAdminError ?? null
+        'RPC ERROR =',
+        rpcError
       );
+
       console.log(
         '=========================================='
       );
 
       /*
-       * Erreur de lecture de la table
+       * --------------------------------------------------------
+       * 6. ERREUR RPC
+       * --------------------------------------------------------
        */
-      if (superAdminError) {
+      if (rpcError) {
         console.error(
-          'Erreur lecture super_admins :',
-          superAdminError
+          'ERREUR RPC SUPER ADMIN =',
+          rpcError
         );
 
         setErrorMessage(
-          `Impossible de vérifier les droits SUPER ADMIN : ${superAdminError.message}`
+          `Erreur lors de la vérification SUPER ADMIN : ${rpcError.message}`
         );
 
         return;
       }
 
       /*
-       * Aucune ligne trouvée
+       * --------------------------------------------------------
+       * 7. EXTRACTION DU RÉSULTAT
+       * --------------------------------------------------------
+       */
+      const superAdmin =
+        Array.isArray(rpcData)
+          ? (rpcData[0] as
+              | SuperAdminResult
+              | undefined)
+          : (rpcData as
+              | SuperAdminResult
+              | null);
+
+      console.log(
+        '=== JDV CRM — SUPER ADMIN FINAL ==='
+      );
+
+      console.log(
+        'SUPER ADMIN =',
+        superAdmin
+      );
+
+      console.log(
+        'IS SUPER ADMIN =',
+        superAdmin?.is_super_admin
+      );
+
+      console.log(
+        'RPC USER ID =',
+        superAdmin?.user_id
+      );
+
+      console.log(
+        'RPC STATUS =',
+        superAdmin?.status
+      );
+
+      console.log(
+        'RPC ACTIF =',
+        superAdmin?.actif
+      );
+
+      console.log(
+        'AUTH USER ID =',
+        authenticatedUserId
+      );
+
+      console.log(
+        '===================================='
+      );
+
+      /*
+       * --------------------------------------------------------
+       * 8. VÉRIFICATION DÉFINITIVE
+       * --------------------------------------------------------
        */
       if (!superAdmin) {
         await supabase.auth.signOut();
 
         setErrorMessage(
-          "Accès refusé. Votre compte Supabase est authentifié, mais aucune autorisation SUPER ADMIN active n’a été trouvée."
+          'ERREUR : Supabase a authentifié le compte, mais la fonction SUPER ADMIN n’a retourné aucune donnée.'
         );
 
         return;
       }
 
-      /*
-       * -----------------------------------------------------
-       * 6. VÉRIFICATION STATUS
-       * -----------------------------------------------------
-       */
-      const statusActive =
-        superAdmin.status === 'active';
-
-      const accountActive =
-        superAdmin.actif !== false;
-
       if (
-        !statusActive ||
-        !accountActive
+        superAdmin.is_super_admin !== true
       ) {
-        console.error(
-          'Compte SUPER ADMIN inactif',
-          superAdmin
-        );
-
         await supabase.auth.signOut();
 
         setErrorMessage(
-          'Accès refusé. Le compte SUPER ADMIN existe mais il est actuellement inactif.'
+          `Accès refusé par Supabase. Résultat RPC : is_super_admin=${String(
+            superAdmin.is_super_admin
+          )}, user_id=${String(
+            superAdmin.user_id
+          )}, status=${String(
+            superAdmin.status
+          )}, actif=${String(
+            superAdmin.actif
+          )}.`
+        );
+
+        return;
+      }
+
+      if (
+        superAdmin.user_id !==
+        authenticatedUserId
+      ) {
+        await supabase.auth.signOut();
+
+        setErrorMessage(
+          `Sécurité : l'UID retourné par le serveur (${String(
+            superAdmin.user_id
+          )}) ne correspond pas à l'UID connecté (${authenticatedUserId}).`
+        );
+
+        return;
+      }
+
+      if (
+        superAdmin.status !== 'active'
+      ) {
+        await supabase.auth.signOut();
+
+        setErrorMessage(
+          `Accès refusé : le compte SUPER ADMIN possède le statut "${String(
+            superAdmin.status
+          )}" au lieu de "active".`
+        );
+
+        return;
+      }
+
+      if (
+        superAdmin.actif !== true
+      ) {
+        await supabase.auth.signOut();
+
+        setErrorMessage(
+          'Accès refusé : le compte SUPER ADMIN est marqué comme inactif.'
         );
 
         return;
       }
 
       /*
-       * -----------------------------------------------------
-       * 7. TOUT EST VALIDÉ
-       * -----------------------------------------------------
+       * --------------------------------------------------------
+       * 9. SUPER ADMIN VALIDÉ
+       * --------------------------------------------------------
        */
       console.log(
         '=========================================='
       );
+
       console.log(
         'JDV CRM — SUPER ADMIN VALIDÉ'
       );
+
       console.log(
         'EMAIL =',
         normalizedEmail
       );
+
       console.log(
         'UID =',
         authenticatedUserId
       );
+
       console.log(
         'STATUS =',
         superAdmin.status
       );
+
       console.log(
         'ACTIF =',
         superAdmin.actif
       );
+
       console.log(
         'REDIRECTION DASHBOARD'
       );
+
       console.log(
         '=========================================='
       );
@@ -435,11 +564,11 @@ router.replace(
       );
 
       /*
-       * Laisser Supabase terminer la persistance
-       * de l'authentification avant la navigation.
+       * Laisser Supabase persister la session.
        */
-      await new Promise((resolve) =>
-        setTimeout(resolve, 500)
+      await new Promise(
+        (resolve) =>
+          setTimeout(resolve, 500)
       );
 
       router.replace(
@@ -462,7 +591,9 @@ router.replace(
   };
 
   /*
+   * ============================================================
    * MOT DE PASSE OUBLIÉ
+   * ============================================================
    */
   const handlePasswordReset = async () => {
     const normalizedEmail =
@@ -500,7 +631,9 @@ router.replace(
           ? `${window.location.origin}/hidden-concepteur-gate/reset-password`
           : undefined;
 
-      const { error } =
+      const {
+        error,
+      } =
         await supabase.auth.resetPasswordForEmail(
           normalizedEmail,
           {
@@ -509,7 +642,9 @@ router.replace(
         );
 
       if (error) {
-        setErrorMessage(error.message);
+        setErrorMessage(
+          error.message
+        );
         return;
       }
 
@@ -532,6 +667,11 @@ router.replace(
     }
   };
 
+  /*
+   * ============================================================
+   * INTERFACE
+   * ============================================================
+   */
   return (
     <main className="min-h-screen bg-[#0B1B3D] text-white flex items-center justify-center px-4 py-8">
       <div className="w-full max-w-md">
@@ -578,7 +718,9 @@ router.replace(
                 autoComplete="email"
                 value={email}
                 onChange={(event) =>
-                  setEmail(event.target.value)
+                  setEmail(
+                    event.target.value
+                  )
                 }
                 placeholder="votre@email.com"
                 disabled={loading}
@@ -601,12 +743,15 @@ router.replace(
                   id="password"
                   type={
                     showPassword
-                      ? 'text' :'password'
+                      ? 'text'
+                      : 'password'
                   }
                   autoComplete="current-password"
                   value={password}
                   onChange={(event) =>
-                    setPassword(event.target.value)
+                    setPassword(
+                      event.target.value
+                    )
                   }
                   placeholder="Votre mot de passe"
                   disabled={loading}
@@ -617,14 +762,16 @@ router.replace(
                   type="button"
                   onClick={() =>
                     setShowPassword(
-                      (current) => !current
+                      (current) =>
+                        !current
                     )
                   }
                   disabled={loading}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium text-[#D4AF37] hover:text-white disabled:opacity-50"
                 >
                   {showPassword
-                    ? 'Masquer' :'Afficher'}
+                    ? 'Masquer'
+                    : 'Afficher'}
                 </button>
 
               </div>
@@ -644,11 +791,12 @@ router.replace(
               </div>
             )}
 
-            {/* BOUTON CONNEXION */}
+            {/* CONNEXION */}
             <button
               type="submit"
               disabled={
-                loading || resetLoading
+                loading ||
+                resetLoading
               }
               className="w-full rounded-lg bg-[#D4AF37] px-4 py-3 font-bold text-[#0B1B3D] transition hover:bg-[#e2c45b] disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -660,14 +808,18 @@ router.replace(
             {/* MOT DE PASSE OUBLIÉ */}
             <button
               type="button"
-              onClick={handlePasswordReset}
+              onClick={
+                handlePasswordReset
+              }
               disabled={
-                loading || resetLoading
+                loading ||
+                resetLoading
               }
               className="w-full text-sm text-white/60 transition hover:text-[#D4AF37] disabled:opacity-50"
             >
               {resetLoading
-                ? 'Envoi en cours…' :'Mot de passe oublié ?'}
+                ? 'Envoi en cours…'
+                : 'Mot de passe oublié ?'}
             </button>
 
           </form>
