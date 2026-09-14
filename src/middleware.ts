@@ -2,41 +2,47 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 
-export async function middleware(
-  request: NextRequest
-) {
+export async function middleware(request: NextRequest) {
   let response = NextResponse.next({
     request,
   });
 
-  const supabaseUrl =
-    process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  // IMPORTANT :
+  // On récupère l'URL Supabase et on la nettoie.
+  const supabaseUrl = (
+    process.env.NEXT_PUBLIC_SUPABASE_URL || ''
+  ).trim();
 
-  const supabaseAnonKey =
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+  const supabaseAnonKey = (
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
+  ).trim();
 
-  /*
-   * ============================================================
-   * VÉRIFICATION VARIABLES SUPABASE
-   * ============================================================
-   */
-  if (!supabaseUrl || !supabaseAnonKey) {
+  console.log('[JDV CRM] Middleware variables:', {
+    url: supabaseUrl,
+    hasAnonKey: Boolean(supabaseAnonKey),
+  });
+
+  // Vérification stricte de l'URL
+  if (
+    !supabaseUrl ||
+    !/^https?:\/\/.+/i.test(supabaseUrl)
+  ) {
     console.error(
-      '[JDV CRM] Variables Supabase manquantes dans le middleware.',
-      {
-        hasUrl: Boolean(supabaseUrl),
-        hasAnonKey: Boolean(supabaseAnonKey),
-      }
+      '[JDV CRM] NEXT_PUBLIC_SUPABASE_URL invalide:',
+      supabaseUrl
     );
 
     return response;
   }
 
-  /*
-   * ============================================================
-   * CLIENT SUPABASE SERVEUR
-   * ============================================================
-   */
+  if (!supabaseAnonKey) {
+    console.error(
+      '[JDV CRM] NEXT_PUBLIC_SUPABASE_ANON_KEY manquante.'
+    );
+
+    return response;
+  }
+
   const supabase = createServerClient(
     supabaseUrl,
     supabaseAnonKey,
@@ -48,15 +54,8 @@ export async function middleware(
 
         setAll(cookiesToSet) {
           cookiesToSet.forEach(
-            ({
-              name,
-              value,
-              options,
-            }) => {
-              request.cookies.set(
-                name,
-                value
-              );
+            ({ name, value, options }) => {
+              request.cookies.set(name, value);
 
               response.cookies.set(
                 name,
@@ -70,59 +69,21 @@ export async function middleware(
     }
   );
 
-  /*
-   * ============================================================
-   * IMPORTANT :
-   * getUser() permet à Supabase de rafraîchir/valider
-   * la session côté serveur.
-   * ============================================================
-   */
   const {
     data: { user },
     error,
   } = await supabase.auth.getUser();
 
-  console.log(
-    '[JDV CRM] Middleware Auth:',
-    {
-      path: request.nextUrl.pathname,
-      userId: user?.id ?? null,
-      email: user?.email ?? null,
-      error: error?.message ?? null,
-    }
-  );
-
-  /*
-   * ============================================================
-   * ROUTE SUPER ADMIN
-   * ============================================================
-   *
-   * Le contrôle définitif des droits SUPER ADMIN
-   * reste effectué par la page/login et le RPC.
-   *
-   * Le middleware ne doit pas interdire ici
-   * un utilisateur simplement parce qu'il n'a
-   * pas encore de session.
-   */
-  if (
-    request.nextUrl.pathname.startsWith(
-      '/hidden-concepteur-gate'
-    )
-  ) {
-    return response;
-  }
+  console.log('[JDV CRM] Middleware Auth:', {
+    path: request.nextUrl.pathname,
+    userId: user?.id ?? null,
+    email: user?.email ?? null,
+    error: error?.message ?? null,
+  });
 
   return response;
 }
 
-/*
- * ============================================================
- * MATCHER
- * ============================================================
- *
- * On évite les fichiers statiques, images,
- * favicon, etc.
- */
 export const config = {
   matcher: [
     '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
