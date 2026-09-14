@@ -1,26 +1,10 @@
+```tsx
 'use client';
 
 import React, { FormEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 
-/**
- * ============================================================
- * JDV CRM
- * CONNEXION SUPER ADMIN / CONCEPTEUR
- * ============================================================
- *
- * IMPORTANT :
- * - Le SUPER ADMIN reste un rôle indépendant.
- * - Aucun abonnement n'est exigé pour le SUPER ADMIN.
- * - La vérification finale des droits se fait dans
- *   public.super_admins.
- * - Aucun service_role n'est utilisé dans le navigateur.
- */
-
-/**
- * Comptes SUPER ADMIN / CONCEPTEUR autorisés.
- */
 const AUTHORIZED_CONCEPTEURS = [
   {
     email: 'romarica15@gmail.com',
@@ -28,7 +12,7 @@ const AUTHORIZED_CONCEPTEURS = [
   },
   {
     email: 'ets.miracle.jdv@gmail.com',
-    userId: '2e2b8bd7-d736-4e75-ab21-9e6e7b5cb1a1',
+    userId: '2e2b8bd7-d736-4e43-97a2-dcce9444805d',
   },
 ] as const;
 
@@ -45,10 +29,12 @@ export default function ConcepteurLoginPage() {
 
   /**
    * ==========================================================
-   * CONNEXION
+   * CONNEXION SUPER ADMIN / CONCEPTEUR
    * ==========================================================
    */
-  const handleLogin = async (event: FormEvent<HTMLFormElement>) => {
+  const handleLogin = async (
+    event: FormEvent<HTMLFormElement>
+  ) => {
     event.preventDefault();
 
     if (loading) {
@@ -58,7 +44,9 @@ export default function ConcepteurLoginPage() {
     setLoading(true);
     setErrorMessage('');
 
-    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedEmail = email
+      .trim()
+      .toLowerCase();
 
     try {
       /**
@@ -66,10 +54,12 @@ export default function ConcepteurLoginPage() {
        * 1. VÉRIFICATION DE L'EMAIL AUTORISÉ
        * --------------------------------------------------------
        */
-      const authorizedAccount = AUTHORIZED_CONCEPTEURS.find(
-        (account) =>
-          account.email.toLowerCase() === normalizedEmail
-      );
+      const authorizedAccount =
+        AUTHORIZED_CONCEPTEURS.find(
+          (account) =>
+            account.email.toLowerCase() ===
+            normalizedEmail
+        );
 
       if (!authorizedAccount) {
         throw new Error(
@@ -85,10 +75,11 @@ export default function ConcepteurLoginPage() {
       const {
         data: authData,
         error: authError,
-      } = await supabase.auth.signInWithPassword({
-        email: normalizedEmail,
-        password,
-      });
+      } =
+        await supabase.auth.signInWithPassword({
+          email: normalizedEmail,
+          password,
+        });
 
       if (authError) {
         console.error(
@@ -110,7 +101,7 @@ export default function ConcepteurLoginPage() {
 
       /**
        * --------------------------------------------------------
-       * 3. UID RÉEL DE LA SESSION
+       * 3. UID RÉEL
        * --------------------------------------------------------
        */
       const authenticatedUserId =
@@ -143,7 +134,8 @@ export default function ConcepteurLoginPage() {
       const {
         data: sessionData,
         error: sessionError,
-      } = await supabase.auth.getSession();
+      } =
+        await supabase.auth.getSession();
 
       console.log(
         'SESSION USER ID =',
@@ -173,6 +165,16 @@ export default function ConcepteurLoginPage() {
         );
       }
 
+      if (
+        !sessionData.session?.user
+      ) {
+        await supabase.auth.signOut();
+
+        throw new Error(
+          'Aucune session utilisateur Supabase active.'
+        );
+      }
+
       /**
        * --------------------------------------------------------
        * 5. VÉRIFICATION STRICTE DE L'UID
@@ -196,83 +198,88 @@ export default function ConcepteurLoginPage() {
 
       /**
        * --------------------------------------------------------
-       * 6. VÉRIFICATION DIRECTE DANS super_admins
+       * 6. VÉRIFICATION SÉCURISÉE DU SUPER ADMIN
        * --------------------------------------------------------
        *
-       * IMPORTANT :
-       * On utilise un tableau au lieu de maybeSingle()
-       * afin de voir exactement ce que Supabase retourne.
+       * La vérification est effectuée par PostgreSQL
+       * via la fonction RPC.
+       *
+       * Le frontend ne lit plus directement la table
+       * super_admins.
        */
- * --------------------------------------------------------
- * 6. VÉRIFICATION SÉCURISÉE DU SUPER ADMIN
- * --------------------------------------------------------
- *
- * La vérification est effectuée par PostgreSQL.
- * Le frontend ne lit plus directement super_admins.
- */
-const {
-  data: isSuperAdmin,
-  error: superAdminError,
-} = await supabase.rpc(
-  'verify_current_super_admin'
-);
+      const {
+        data: isSuperAdmin,
+        error: superAdminError,
+      } =
+        await supabase.rpc(
+          'verify_current_super_admin'
+        );
 
-console.log(
-  'SUPER ADMIN RPC RESULT =',
-  isSuperAdmin
-);
+      console.log(
+        'SUPER ADMIN RPC RESULT =',
+        isSuperAdmin
+      );
 
-console.log(
-  'SUPER ADMIN RPC ERROR =',
-  superAdminError
-);
+      console.log(
+        'SUPER ADMIN RPC ERROR =',
+        superAdminError
+      );
 
-if (superAdminError) {
-  console.error(
-    'ERREUR RPC SUPER ADMIN =',
-    superAdminError
-  );
+      /**
+       * --------------------------------------------------------
+       * 7. ERREUR RPC
+       * --------------------------------------------------------
+       */
+      if (superAdminError) {
+        console.error(
+          'ERREUR RPC SUPER ADMIN =',
+          superAdminError
+        );
 
-  await supabase.auth.signOut();
-
-  throw new Error(
-    `Erreur de vérification SUPER ADMIN : ${superAdminError.message}`
-  );
-}
-
-if (isSuperAdmin !== true) {
-  console.error(
-    'SUPER ADMIN NON AUTORISÉ POUR UID =',
-    authenticatedUserId
-  );
-
-  await supabase.auth.signOut();
-
-  throw new Error(
-    `Accès refusé. L’UID ${authenticatedUserId} n’est pas reconnu comme SUPER ADMIN actif.`
-  );
-}
-
-console.log(
-  'SUPER ADMIN VALIDÉ PAR SUPABASE'
-);
-      ) {
         await supabase.auth.signOut();
 
         throw new Error(
-          'Accès refusé. Le compte SUPER ADMIN a été désactivé.'
+          `Erreur de vérification SUPER ADMIN : ${superAdminError.message}`
         );
       }
 
       /**
        * --------------------------------------------------------
-       * 12. SESSION FINALE
+       * 8. COMPTE NON RECONNU COMME SUPER ADMIN
+       * --------------------------------------------------------
+       */
+      if (isSuperAdmin !== true) {
+        console.error(
+          'SUPER ADMIN NON AUTORISÉ POUR UID =',
+          authenticatedUserId
+        );
+
+        await supabase.auth.signOut();
+
+        throw new Error(
+          `Accès refusé. L’UID ${authenticatedUserId} n’est pas reconnu comme SUPER ADMIN actif.`
+        );
+      }
+
+      /**
+       * --------------------------------------------------------
+       * 9. SUPER ADMIN VALIDÉ
+       * --------------------------------------------------------
+       */
+      console.log(
+        'SUPER ADMIN VALIDÉ PAR SUPABASE'
+      );
+
+      /**
+       * --------------------------------------------------------
+       * 10. VÉRIFICATION FINALE DE SESSION
        * --------------------------------------------------------
        */
       const {
         data: finalSession,
         error: finalSessionError,
-      } = await supabase.auth.getSession();
+      } =
+        await supabase.auth.getSession();
 
       if (finalSessionError) {
         await supabase.auth.signOut();
@@ -294,7 +301,7 @@ console.log(
 
       /**
        * --------------------------------------------------------
-       * 13. SUCCÈS
+       * 11. CONNEXION RÉUSSIE
        * --------------------------------------------------------
        */
       console.log(
@@ -316,7 +323,7 @@ console.log(
       );
 
       /**
-       * Redirection vers le portail SUPER ADMIN.
+       * Redirection vers le dashboard SUPER ADMIN.
        */
       router.replace(
         '/hidden-concepteur-gate/dashboard'
@@ -329,9 +336,7 @@ console.log(
         error
       );
 
-      if (
-        error instanceof Error
-      ) {
+      if (error instanceof Error) {
         setErrorMessage(
           error.message
         );
@@ -353,7 +358,9 @@ console.log(
   const handleForgotPassword = async () => {
     setErrorMessage('');
 
-    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedEmail = email
+      .trim()
+      .toLowerCase();
 
     if (!normalizedEmail) {
       setErrorMessage(
@@ -407,9 +414,7 @@ console.log(
         error
       );
 
-      if (
-        error instanceof Error
-      ) {
+      if (error instanceof Error) {
         setErrorMessage(
           error.message
         );
@@ -432,7 +437,6 @@ console.log(
     <main className="min-h-screen bg-[#0B1B3D] text-white flex items-center justify-center px-4">
       <div className="w-full max-w-md">
 
-        {/* Logo / identité */}
         <div className="text-center mb-8">
           <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-2xl border border-[#D4AF37] bg-[#111F43] shadow-lg">
             <span className="text-2xl font-bold text-[#D4AF37]">
@@ -449,7 +453,6 @@ console.log(
           </p>
         </div>
 
-        {/* Carte */}
         <div className="rounded-2xl border border-white/10 bg-white/5 p-6 shadow-2xl backdrop-blur">
 
           <form
@@ -457,7 +460,6 @@ console.log(
             className="space-y-5"
           >
 
-            {/* Email */}
             <div>
               <label
                 htmlFor="email"
@@ -483,7 +485,6 @@ console.log(
               />
             </div>
 
-            {/* Mot de passe */}
             <div>
               <label
                 htmlFor="password"
@@ -535,7 +536,6 @@ console.log(
               </div>
             </div>
 
-            {/* Mot de passe oublié */}
             <div className="text-right">
               <button
                 type="button"
@@ -549,14 +549,12 @@ console.log(
               </button>
             </div>
 
-            {/* Message */}
             {errorMessage && (
               <div className="rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
                 {errorMessage}
               </div>
             )}
 
-            {/* Connexion */}
             <button
               type="submit"
               disabled={loading}
@@ -568,15 +566,16 @@ console.log(
             </button>
           </form>
 
-          {/* Sécurité */}
           <div className="mt-6 border-t border-white/10 pt-5 text-center">
             <p className="text-xs text-white/50">
               Accès réservé aux comptes
               SUPER ADMIN / CONCEPTEUR autorisés.
             </p>
           </div>
+
         </div>
       </div>
     </main>
   );
 }
+```
