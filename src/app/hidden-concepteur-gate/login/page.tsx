@@ -135,9 +135,15 @@ export default function ConcepteurLoginPage() {
 
       const authenticatedUserId =
         authData.user.id;
-
-      /**
-       * --------------------------------------------------------
+console.log('AUTH USER ID =', authenticatedUserId);
+console.log('AUTHORIZED USER ID =', authorizedAccount.userId);
+console.log('AUTH EMAIL =', authData.user.email);
+ const {
+  data: superAdmin,
+  error: superAdminError,
+} = await supabase     /**
+console.log('SUPER ADMIN DATA =', superAdmin);
+console.log('SUPER ADMIN ERROR =', superAdminError);       * --------------------------------------------------------
        * 5. VÉRIFICATION STRICTE DE L'UID
        * --------------------------------------------------------
        */
