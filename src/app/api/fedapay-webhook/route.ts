@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import crypto from 'node:crypto';
 
 const FEDAPAY_ENV =
   process.env.FEDAPAY_ENV === 'live' ?'live' :'sandbox';
@@ -314,13 +315,17 @@ export async function POST(
       await req.text();
 
     if (!rawBody) {
-      return NextResponse.json(
-        {
-          error:
-            'Empty webhook payload.',
-        },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'Empty webhook payload.' }, { status: 400 });
+    }
+
+    const webhookSecret = process.env.FEDAPAY_WEBHOOK_SECRET?.trim();
+    if (webhookSecret) {
+      const signature = req.headers.get('x-fedapay-signature')?.trim();
+      const expected = crypto.createHmac('sha256', webhookSecret).update(rawBody, 'utf8').digest('hex');
+      const a = Buffer.from(expected); const b = Buffer.from(signature || '');
+      if (!signature || a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
+        return NextResponse.json({ error: 'Signature FedaPay invalide.' }, { status: 401 });
+      }
     }
 
     // ============================================================
@@ -899,6 +904,13 @@ export async function POST(
             subscription.id
           );
 
+      await supabaseAdmin
+        .from('organization_subscriptions')
+        .update({ status: 'cancelled', auto_renew: false })
+        .eq('organization_id', organizationId)
+        .eq('status', 'trial')
+        .neq('id', subscription.id);
+
       if (
         subscriptionUpdateError
       ) {
@@ -1144,4 +1156,57 @@ export async function POST(
       { status: 500 }
     );
   }
+}
+
+src/app/api/partner/fedapay/checkout/route.ts
+
+import { NextRequest, NextResponse } from 'next/server';
+import { getAdminClient } from '@/lib/supabase/server';
+import { decryptSecret } from '@/lib/server/crypto';
+const BASE=(env:string)=>env==='live'?'https://api.fedapay.com/v1':'https://sandbox-api.fedapay.com/v1';
+type Body={organizationId?:string;saleId?:string;amount?:number;customer?:{email?:string;firstname?:string;lastname?:string;phone?:string}};
+export async function POST(req:NextRequest){const admin=getAdminClient();try{const b=await req.json() as Body;const organizationId=b.organizationId?.trim();const saleId=b.saleId?.trim();const amount=Math.round(Number(b.amount));if(!organizationId||!saleId||!Number.isFinite(amount)||amount<=0)return NextResponse.json({error:'organizationId, saleId et montant sont obligatoires.'},{status:400});const {data:account}=await admin.from('payment_provider_accounts').select('environment,secret_key_encrypted,status').eq('organization_id',organizationId).eq('provider','fedapay').maybeSingle();if(!account||account.status!=='active'||!account.secret_key_encrypted)return NextResponse.json({error:'FedaPay du partenaire n’est pas configuré.'},{status:503});const secret=decryptSecret(account.secret_key_encrypted);if(!secret)return NextResponse.json({error:'Configuration FedaPay invalide.'},{status:503});const {data:sale}=await admin.from('sales').select('id,sale_number,organization_id,client_id,amount_remaining,client_phone').eq('id',saleId).eq('organization_id',organizationId).maybeSingle();if(!sale)return NextResponse.json({error:'Vente introuvable.'},{status:404});if(Number(sale.amount_remaining||0)<=0)return NextResponse.json({error:'Cette vente est déjà soldée.'},{status:409});if(amount>Number(sale.amount_remaining))return NextResponse.json({error:'Le montant dépasse le solde restant.'},{status:422});const reference=`JDVCRM-CUST-${sale.id.slice(0,8)}-${Date.now()}`;const siteUrl=(process.env.NEXT_PUBLIC_SITE_URL||new URL(req.url).origin).replace(/\/$/,'');const callback=`${siteUrl}/paiement-retour?organization_id=${encodeURIComponent(organizationId)}&sale_id=${encodeURIComponent(saleId)}`;const {data:payment,error:pe}=await admin.from('payments').insert({organization_id:organizationId,sale_id:saleId,client_id:sale.client_id,amount,currency:'XOF',payment_method:'fedapay',status:'pending',provider:'fedapay',merchant_reference:reference,metadata:{customer:b.customer||null,environment:account.environment}}).select('id').single();if(pe||!payment)throw new Error(pe?.message||'Impossible d’enregistrer le paiement.');const r=await fetch(`${BASE(account.environment)}/transactions`,{method:'POST',headers:{Authorization:`Bearer ${secret}`,'Content-Type':'application/json'},body:JSON.stringify({description:`Paiement ${sale.sale_number}`,amount,currency:{iso:'XOF'},callback_url:callback,merchant_reference:reference,custom_metadata:{organization_id:organizationId,sale_id:saleId,payment_id:payment.id},customer:{email:b.customer?.email,firstname:b.customer?.firstname,lastname:b.customer?.lastname,phone_number:b.customer?.phone||sale.client_phone}})});const txPayload=await r.json().catch(()=>null);if(!r.ok){await admin.from('payments').update({status:'failed',metadata:{error:txPayload}}).eq('id',payment.id);return NextResponse.json({error:'FedaPay n’a pas pu créer la transaction.'},{status:502});}const tx=(txPayload?.v1||txPayload?.transaction||txPayload?.entity||txPayload) as Record<string,unknown>;const transactionId=String(tx?.id||tx?.transaction_id||'');await admin.from('payments').update({provider_transaction_id:transactionId,metadata:{transaction:tx,environment:account.environment}}).eq('id',payment.id);const tokenR=await fetch(`${BASE(account.environment)}/transactions/${encodeURIComponent(transactionId)}/token`,{method:'POST',headers:{Authorization:`Bearer ${secret}`,'Content-Type':'application/json'}});const token=await tokenR.json().catch(()=>null);if(!tokenR.ok)return NextResponse.json({error:'Transaction créée mais lien FedaPay indisponible.'},{status:502});return NextResponse.json({checkoutUrl:token?.url||token?.token?.url,paymentId:payment.id,transactionId,reference});}catch(e){console.error('[JDV CRM] partner checkout',e);return NextResponse.json({error:e instanceof Error?e.message:'Erreur interne.'},{status:500});}}
+
+
+src/app/api/partner/fedapay/route.ts
+
+import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@/lib/supabase/server';
+import { encryptSecret } from '@/lib/server/crypto';
+
+async function context() {
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { supabase, user: null, organizationId: null };
+  const { data: membership } = await supabase.from('organization_members').select('organization_id').eq('user_id', user.id).eq('role', 'business_admin').eq('status', 'active').limit(1).maybeSingle();
+  return { supabase, user, organizationId: membership?.organization_id ?? null };
+}
+
+export async function GET() {
+  const { supabase, user, organizationId } = await context();
+  if (!user) return NextResponse.json({ error: 'Authentification requise.' }, { status: 401 });
+  if (!organizationId) return NextResponse.json({ error: 'Accès administrateur requis.' }, { status: 403 });
+  const { data, error } = await supabase.from('payment_provider_accounts').select('id,provider,environment,public_key,status,last_verified_at,created_at,updated_at').eq('organization_id', organizationId).eq('provider', 'fedapay').maybeSingle();
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ account: data ?? null });
+}
+
+export async function PUT(req: NextRequest) {
+  const { supabase, user, organizationId } = await context();
+  if (!user) return NextResponse.json({ error: 'Authentification requise.' }, { status: 401 });
+  if (!organizationId) return NextResponse.json({ error: 'Accès administrateur requis.' }, { status: 403 });
+  const body = await req.json().catch(() => ({}));
+  const publicKey = String(body.publicKey || '').trim();
+  const secretKey = String(body.secretKey || '').trim();
+  const webhookSecret = String(body.webhookSecret || '').trim();
+  const environment = body.environment === 'live' ? 'live' : 'sandbox';
+  if (!publicKey || !secretKey) return NextResponse.json({ error: 'La clé publique et la clé secrète FedaPay sont obligatoires.' }, { status: 400 });
+
+  const { data, error } = await supabase.from('payment_provider_accounts').upsert({
+    organization_id: organizationId, provider: 'fedapay', environment, public_key: publicKey,
+    secret_key_encrypted: encryptSecret(secretKey), webhook_secret_encrypted: encryptSecret(webhookSecret),
+    status: 'active', updated_at: new Date().toISOString(),
+  }, { onConflict: 'organization_id,provider' }).select('id,provider,environment,public_key,status,last_verified_at,created_at,updated_at').single();
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ success: true, account: data });
 }
