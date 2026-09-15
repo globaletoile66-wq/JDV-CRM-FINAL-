@@ -2,13 +2,23 @@ import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
 
-export async function middleware(request: NextRequest) {
-  let response = NextResponse.next({
-    request,
-  });
+/* ============================================================================
+ * JDV CRM — MIDDLEWARE
+ *
+ * Rôle : rafraîchir les cookies de session Supabase à chaque requête.
+ *
+ * Ce middleware NE BLOQUE AUCUNE ROUTE volontairement. La protection de
+ * l'espace SUPER ADMIN est assurée côté page, via le helper partagé
+ * `@/lib/auth/super-admin`. Ajouter ici une redirection serait le moyen le
+ * plus rapide de recréer une boucle login → dashboard → login.
+ *
+ * Les journaux verbeux ont été retirés : ils s'exécutaient à chaque requête,
+ * y compris pour les ressources statiques, et noyaient la console.
+ * ========================================================================== */
 
-  // IMPORTANT :
-  // On récupère l'URL Supabase et on la nettoie.
+export async function middleware(request: NextRequest) {
+  const response = NextResponse.next({ request });
+
   const supabaseUrl = (
     process.env.NEXT_PUBLIC_SUPABASE_URL || ''
   ).trim();
@@ -17,19 +27,9 @@ export async function middleware(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
   ).trim();
 
-  console.log('[JDV CRM] Middleware variables:', {
-    url: supabaseUrl,
-    hasAnonKey: Boolean(supabaseAnonKey),
-  });
-
-  // Vérification stricte de l'URL
-  if (
-    !supabaseUrl ||
-    !/^https?:\/\/.+/i.test(supabaseUrl)
-  ) {
+  if (!supabaseUrl || !/^https?:\/\/.+/i.test(supabaseUrl)) {
     console.error(
-      '[JDV CRM] NEXT_PUBLIC_SUPABASE_URL invalide:',
-      supabaseUrl
+      '[JDV CRM] NEXT_PUBLIC_SUPABASE_URL absente ou invalide.'
     );
 
     return response;
@@ -43,43 +43,23 @@ export async function middleware(request: NextRequest) {
     return response;
   }
 
-  const supabase = createServerClient(
-    supabaseUrl,
-    supabaseAnonKey,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll();
-        },
-
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(
-            ({ name, value, options }) => {
-              request.cookies.set(name, value);
-
-              response.cookies.set(
-                name,
-                value,
-                options
-              );
-            }
-          );
-        },
+  const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
+    cookies: {
+      getAll() {
+        return request.cookies.getAll();
       },
-    }
-  );
 
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser();
-
-  console.log('[JDV CRM] Middleware Auth:', {
-    path: request.nextUrl.pathname,
-    userId: user?.id ?? null,
-    email: user?.email ?? null,
-    error: error?.message ?? null,
+      setAll(cookiesToSet) {
+        cookiesToSet.forEach(({ name, value, options }) => {
+          request.cookies.set(name, value);
+          response.cookies.set(name, value, options);
+        });
+      },
+    },
   });
+
+  /* Rafraîchit la session et réécrit les cookies si nécessaire. */
+  await supabase.auth.getUser();
 
   return response;
 }
