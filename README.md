@@ -29,9 +29,7 @@ JDV CRM est organisé autour de plusieurs espaces indépendants.
 
 Route :
 
-```text
 /
-```
 
 Le site présente JDV CRM, ses fonctionnalités, ses offres et permet à une entreprise de commencer son inscription.
 
@@ -41,10 +39,9 @@ Le site présente JDV CRM, ses fonctionnalités, ses offres et permet à une ent
 
 Routes principales :
 
-```text
 /terrain/login
 /terrain/dashboard
-```
+
 
 Cet espace est destiné aux prospecteurs travaillant sur le terrain.
 
@@ -67,10 +64,9 @@ Fonctionnalités principales :
 
 Routes principales :
 
-```text
 /business/login
 /business/dashboard
-```
+
 
 Cet espace permet à l'entreprise de gérer son activité.
 
@@ -99,9 +95,7 @@ Fonctionnalités principales :
 
 Route :
 
-```text
 /hidden-concepteur-gate/login
-```
 
 Cet espace est volontairement masqué du parcours public.
 
@@ -129,7 +123,6 @@ JDV CRM utilise **Supabase PostgreSQL**.
 
 L'architecture principale repose sur :
 
-```text
 auth.users
      │
      ▼
@@ -140,11 +133,9 @@ organization_members
      │
      ▼
 organizations
-```
 
 Les principales tables métier comprennent notamment :
 
-```text
 organizations
 organization_members
 organization_settings
@@ -194,7 +185,6 @@ Supabase Authentication
 
 Les données sont isolées par :
 
-```text
 organization_id
 ```
 
@@ -245,7 +235,6 @@ npm install
 
 Créer un fichier :
 
-```text
 .env.local
 ```
 
@@ -271,7 +260,6 @@ npm run dev
 
 L'application sera disponible sur :
 
-```text
 http://localhost:4028
 ```
 
@@ -337,7 +325,6 @@ Formate automatiquement le code du projet.
 
 # 📁 Structure du projet
 
-```text
 jdvcrm/
 │
 ├── public/
@@ -422,7 +409,6 @@ L'architecture prévoit notamment :
 
 La langue par défaut actuelle est :
 
-```text
 Français
 ```
 
@@ -465,7 +451,7 @@ npm run start
 
 Ne jamais versionner les fichiers contenant des secrets :
 
-```text
+
 .env
 .env.local
 .env.production.local
