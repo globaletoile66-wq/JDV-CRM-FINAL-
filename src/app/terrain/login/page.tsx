@@ -32,32 +32,42 @@ export default function TerrainLoginPage() {
 
       const userId = authData.user.id;
 
-      const { data: userProfile, error: profileError } = await supabase
-        .from('users')
-        .select('role, enterprise_id, secteur_assigne, code_prospecteur')
-        .eq('id', userId)
-        .single();
+      const { data: membership, error: membershipError } = await supabase
+        .from('organization_members')
+        .select('organization_id, role, status')
+        .eq('user_id', userId)
+        .eq('role', 'prospecteur')
+        .eq('status', 'active')
+        .limit(1)
+        .maybeSingle();
 
-      if (profileError || !userProfile) {
+      if (membershipError || !membership) {
         await supabase.auth.signOut();
         throw new Error(
-          'Profil introuvable. Contactez votre superviseur pour configurer votre accès.'
+          'Profil prospecteur introuvable ou désactivé. Contactez votre administrateur.'
         );
       }
 
-      const { role, secteur_assigne } = userProfile;
+      const { data: prospecteur, error: prospecteurError } = await supabase
+        .from('prospecteurs')
+        .select('id, code, first_name, last_name, city, status')
+        .eq('user_id', userId)
+        .eq('organization_id', membership.organization_id)
+        .maybeSingle();
 
-      if (role !== 'prospector') {
+      if (prospecteurError || !prospecteur || prospecteur.status !== 'active') {
         await supabase.auth.signOut();
-        throw new Error('Accès refusé : ce portail est réservé aux prospecteurs terrain.');
+        throw new Error(
+          'Votre compte prospecteur n’est pas encore configuré ou est désactivé.'
+        );
       }
 
-      if (secteur_assigne) {
-        try {
-          localStorage.setItem('secteur', secteur_assigne);
-        } catch {
-          // localStorage may not be available
-        }
+      try {
+        localStorage.setItem('jdvcrm_organization_id', membership.organization_id);
+        localStorage.setItem('jdvcrm_prospecteur_id', prospecteur.id);
+        localStorage.setItem('jdvcrm_prospecteur_code', prospecteur.code || '');
+      } catch {
+        // Le stockage local est optionnel.
       }
 
       // Use replace to avoid back-button issues
@@ -215,4 +225,20 @@ export default function TerrainLoginPage() {
       </div>
     </div>
   );
+}
+
+
+src/lib/auth/super-admin-server.ts
+
+import { createClient } from '@/lib/supabase/server';
+import { getAdminClient } from '@/lib/supabase/server';
+
+export async function requireSuperAdminServer() {
+  const sessionClient = await createClient();
+  const { data: { user } } = await sessionClient.auth.getUser();
+  if (!user) throw new Error('Authentification requise.');
+  const admin = getAdminClient();
+  const { data } = await admin.from('super_admins').select('user_id,status,actif').eq('user_id',user.id).maybeSingle();
+  if (!data || data.status !== 'active' || data.actif === false) throw new Error('Accès SUPER ADMIN refusé.');
+  return { user, admin };
 }
