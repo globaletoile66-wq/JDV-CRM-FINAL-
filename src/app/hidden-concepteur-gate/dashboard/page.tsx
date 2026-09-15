@@ -1,162 +1,237 @@
 'use client';
 
+import React, { useEffect, useState, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import {
+  checkCurrentSuperAdmin,
+  SUPER_ADMIN_LOGIN_ROUTE,
+} from '@/lib/auth/super-admin';
+import { fetchSuperAdminDashboard } from '@/lib/services/superAdminService';
 
 /* ============================================================================
- * JDV CRM — VÉRIFICATION SUPER ADMIN (SOURCE UNIQUE DE VÉRITÉ)
- *
- * Toutes les pages et services qui ont besoin de savoir si l'utilisateur
- * courant est SUPER ADMIN doivent passer par ce module, et uniquement par lui.
- *
- * Avant, la page de connexion et le service dashboard utilisaient deux
- * méthodes différentes (RPC d'un côté, lecture de table de l'autre), avec des
- * critères légèrement différents. Résultat : le login validait l'accès, le
- * dashboard le refusait, et l'utilisateur rebondissait en boucle entre les
- * deux pages.
- *
- * Méthode retenue : lecture directe de la table super_admins.
- * La politique RLS `user_id = auth.uid()` autorise chaque SUPER ADMIN à lire
- * sa propre ligne, et rien d'autre.
+ * JDV CRM — SUPER ADMIN DASHBOARD PAGE
  * ========================================================================== */
 
-export const AUTHORIZED_CONCEPTEURS = [
-  {
-    email: 'romarica15@gmail.com',
-    userId: '57e90659-4ace-4824-aa4f-de84317622e8',
-  },
-  {
-    email: 'ets.miracle.jdv@gmail.com',
-    userId: '2e2b8bd7-d736-4e75-ab21-9e6e7b5cb1a1',
-  },
-] as const;
+export default function SuperAdminDashboardPage() {
+  const router = useRouter();
+  const [loading, setLoading] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [dashboardData, setDashboardData] = useState<Awaited<ReturnType<typeof fetchSuperAdminDashboard>> | null>(null);
+  const [dataError, setDataError] = useState<string | null>(null);
 
-export const SUPER_ADMIN_LOGIN_ROUTE =
-  '/hidden-concepteur-gate/login';
+  const loadDashboard = useCallback(async () => {
+    setLoading(true);
+    setAuthError(null);
+    setDataError(null);
 
-export const SUPER_ADMIN_DASHBOARD_ROUTE =
-  '/hidden-concepteur-gate/dashboard';
+    const check = await checkCurrentSuperAdmin();
 
-export type SuperAdminCheck =
-  | {
-      ok: true;
-      userId: string;
-      email: string | null;
+    if (!check.ok) {
+      router.replace(SUPER_ADMIN_LOGIN_ROUTE);
+      return;
     }
-  | {
-      ok: false;
-      reason:
-        | 'no-session'
-        | 'not-listed'
-        | 'read-error'
-        | 'no-row'
-        | 'inactive';
-      message: string;
-    };
 
-export function findAuthorizedByEmail(email: string) {
-  const normalized = email.trim().toLowerCase();
+    try {
+      const data = await fetchSuperAdminDashboard();
+      setDashboardData(data);
+    } catch (err) {
+      setDataError(
+        err instanceof Error ? err.message : 'Erreur lors du chargement des données.'
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [router]);
 
-  return AUTHORIZED_CONCEPTEURS.find(
-    (account) => account.email.toLowerCase() === normalized
+  useEffect(() => {
+    loadDashboard();
+  }, [loadDashboard]);
+
+  const handleLogout = async () => {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    router.replace(SUPER_ADMIN_LOGIN_ROUTE);
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-black">
+        <div className="text-center">
+          <div className="w-10 h-10 border-2 border-white border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-white text-sm">Chargement du tableau de bord…</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (authError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-black">
+        <div className="text-center max-w-md px-6">
+          <p className="text-red-400 text-sm mb-4">{authError}</p>
+          <button
+            onClick={() => router.replace(SUPER_ADMIN_LOGIN_ROUTE)}
+            className="px-4 py-2 bg-white text-black text-sm font-medium rounded hover:bg-gray-200 transition-colors"
+          >
+            Retour à la connexion
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-black text-white">
+      {/* Header */}
+      <header className="border-b border-white/10 px-6 py-4 flex items-center justify-between">
+        <div>
+          <h1 className="text-lg font-semibold tracking-tight">
+            JDV CRM — Super Admin
+          </h1>
+          <p className="text-xs text-white/50 mt-0.5">Tableau de bord concepteur</p>
+        </div>
+        <button
+          onClick={handleLogout}
+          className="px-3 py-1.5 text-xs border border-white/20 rounded hover:bg-white/10 transition-colors"
+        >
+          Déconnexion
+        </button>
+      </header>
+
+      {/* Main content */}
+      <main className="px-6 py-8 max-w-7xl mx-auto">
+        {dataError && (
+          <div className="mb-6 p-4 bg-red-900/30 border border-red-500/30 rounded-lg">
+            <p className="text-red-400 text-sm">{dataError}</p>
+            <button
+              onClick={loadDashboard}
+              className="mt-2 text-xs text-red-300 underline hover:text-red-200"
+            >
+              Réessayer
+            </button>
+          </div>
+        )}
+
+        {dashboardData && (
+          <div className="space-y-8">
+            {/* KPIs */}
+            <section>
+              <h2 className="text-sm font-medium text-white/60 uppercase tracking-wider mb-4">
+                Vue d&apos;ensemble
+              </h2>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <KPICard label="Total entreprises" value={dashboardData.kpis.total} />
+                <KPICard label="Actives" value={dashboardData.kpis.active} accent="green" />
+                <KPICard label="Suspendues" value={dashboardData.kpis.suspended} accent="red" />
+                <KPICard label="En attente" value={dashboardData.kpis.pending} accent="yellow" />
+              </div>
+            </section>
+
+            {/* Financial */}
+            <section>
+              <h2 className="text-sm font-medium text-white/60 uppercase tracking-wider mb-4">
+                Finances
+              </h2>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <KPICard label="Revenu total" value={`${dashboardData.financial.totalRevenue.toFixed(0)} XOF`} />
+                <KPICard label="Revenu mensuel" value={`${dashboardData.financial.monthlyRevenue.toFixed(0)} XOF`} />
+                <KPICard label="Paiements" value={dashboardData.financial.paymentCount} />
+                <KPICard label="Abonnements actifs" value={dashboardData.financial.activeSubscriptions} />
+              </div>
+            </section>
+
+            {/* Enterprises table */}
+            <section>
+              <h2 className="text-sm font-medium text-white/60 uppercase tracking-wider mb-4">
+                Entreprises ({dashboardData.enterprises.length})
+              </h2>
+              <div className="overflow-x-auto rounded-lg border border-white/10">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-white/10 bg-white/5">
+                      <th className="text-left px-4 py-3 text-white/60 font-medium">Entreprise</th>
+                      <th className="text-left px-4 py-3 text-white/60 font-medium">Statut</th>
+                      <th className="text-left px-4 py-3 text-white/60 font-medium">Tier</th>
+                      <th className="text-right px-4 py-3 text-white/60 font-medium">Prospecteurs</th>
+                      <th className="text-right px-4 py-3 text-white/60 font-medium">MRR</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dashboardData.enterprises.map((ent) => (
+                      <tr key={ent.id} className="border-b border-white/5 hover:bg-white/5 transition-colors">
+                        <td className="px-4 py-3">
+                          <div className="font-medium">{ent.nom_entreprise}</div>
+                          <div className="text-xs text-white/40">{ent.ownerEmail}</div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <StatusBadge status={ent.status_abonnement} />
+                        </td>
+                        <td className="px-4 py-3 text-white/70">{ent.tier}</td>
+                        <td className="px-4 py-3 text-right text-white/70">{ent.prospectorCount}</td>
+                        <td className="px-4 py-3 text-right text-white/70">{ent.mrr}</td>
+                      </tr>
+                    ))}
+                    {dashboardData.enterprises.length === 0 && (
+                      <tr>
+                        <td colSpan={5} className="px-4 py-8 text-center text-white/30 text-sm">
+                          Aucune entreprise trouvée.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+        )}
+      </main>
+    </div>
   );
 }
 
-export function isAuthorizedUserId(userId: string): boolean {
-  return AUTHORIZED_CONCEPTEURS.some(
-    (account) => account.userId === userId
+/* ============================================================================
+ * Sub-components
+ * ========================================================================== */
+
+interface KPICardProps {
+  label: string;
+  value: string | number;
+  accent?: 'green' | 'red' | 'yellow';
+}
+
+function KPICard({ label, value, accent }: KPICardProps) {
+  const accentClass =
+    accent === 'green' ?'text-green-400'
+      : accent === 'red' ?'text-red-400'
+      : accent === 'yellow' ?'text-yellow-400' :'text-white';
+
+  return (
+    <div className="bg-white/5 border border-white/10 rounded-lg px-4 py-4">
+      <p className="text-xs text-white/50 mb-1">{label}</p>
+      <p className={`text-2xl font-semibold ${accentClass}`}>{value}</p>
+    </div>
   );
 }
 
-/* ----------------------------------------------------------------------------
- * Vérification complète de l'utilisateur actuellement connecté.
- *
- * Ne lève jamais d'exception : renvoie toujours un objet décrivant le résultat.
- * Les pages peuvent ainsi décider quoi afficher sans try/catch partout.
- * -------------------------------------------------------------------------- */
-
-export async function checkCurrentSuperAdmin(): Promise<SuperAdminCheck> {
-  const supabase = createClient();
-
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser();
-
-  if (userError || !user) {
-    return {
-      ok: false,
-      reason: 'no-session',
-      message: "Aucune session active.",
-    };
-  }
-
-  if (!isAuthorizedUserId(user.id)) {
-    return {
-      ok: false,
-      reason: 'not-listed',
-      message:
-        "Ce compte ne figure pas dans la liste des concepteurs autorisés.",
-    };
-  }
-
-  const { data: row, error: readError } = await supabase
-    .from('super_admins')
-    .select('user_id, status, actif')
-    .eq('user_id', user.id)
-    .maybeSingle();
-
-  if (readError) {
-    return {
-      ok: false,
-      reason: 'read-error',
-      message: `Lecture du compte SUPER ADMIN impossible : ${readError.message}`,
-    };
-  }
-
-  if (!row) {
-    return {
-      ok: false,
-      reason: 'no-row',
-      message:
-        "Aucune entrée SUPER ADMIN n'est associée à ce compte.",
-    };
-  }
-
-  const status = String(row.status ?? '').trim().toLowerCase();
-  const actif = row.actif !== false;
-
-  if (status !== 'active' || !actif) {
-    return {
-      ok: false,
-      reason: 'inactive',
-      message: `Compte SUPER ADMIN inactif (status=${status || 'null'}, actif=${String(row.actif)}).`,
-    };
-  }
-
-  return {
-    ok: true,
-    userId: user.id,
-    email: user.email ?? null,
-  };
+interface StatusBadgeProps {
+  status: string;
 }
 
-/* ----------------------------------------------------------------------------
- * Variante qui lève une exception — pratique pour les services de données du
- * dashboard, qui veulent interrompre net une requête non autorisée.
- * -------------------------------------------------------------------------- */
-
-export async function ensureSuperAdmin(): Promise<{
-  userId: string;
-  email: string | null;
-}> {
-  const result = await checkCurrentSuperAdmin();
-
-  if (!result.ok) {
-    throw new Error(result.message);
-  }
-
-  return {
-    userId: result.userId,
-    email: result.email,
+function StatusBadge({ status }: StatusBadgeProps) {
+  const map: Record<string, { label: string; className: string }> = {
+    active: { label: 'Actif', className: 'bg-green-900/40 text-green-400 border-green-500/30' },
+    suspendu: { label: 'Suspendu', className: 'bg-red-900/40 text-red-400 border-red-500/30' },
+    trial: { label: 'Essai', className: 'bg-blue-900/40 text-blue-400 border-blue-500/30' },
+    pending: { label: 'En attente', className: 'bg-yellow-900/40 text-yellow-400 border-yellow-500/30' },
+    expired: { label: 'Expiré', className: 'bg-gray-900/40 text-gray-400 border-gray-500/30' },
   };
+
+  const config = map[status] ?? { label: status, className: 'bg-white/10 text-white/60 border-white/20' };
+
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs border ${config.className}`}>
+      {config.label}
+    </span>
+  );
 }

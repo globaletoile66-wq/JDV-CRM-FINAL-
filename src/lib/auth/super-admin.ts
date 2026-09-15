@@ -7,16 +7,6 @@ import { createClient } from '@/lib/supabase/client';
  *
  * Toutes les pages et services qui ont besoin de savoir si l'utilisateur
  * courant est SUPER ADMIN doivent passer par ce module, et uniquement par lui.
- *
- * Avant, la page de connexion et le service dashboard utilisaient deux
- * méthodes différentes (RPC d'un côté, lecture de table de l'autre), avec des
- * critères légèrement différents. Résultat : le login validait l'accès, le
- * dashboard le refusait, et l'utilisateur rebondissait en boucle entre les
- * deux pages.
- *
- * Méthode retenue : lecture directe de la table super_admins.
- * La politique RLS `user_id = auth.uid()` autorise chaque SUPER ADMIN à lire
- * sa propre ligne, et rien d'autre.
  * ========================================================================== */
 
 export const AUTHORIZED_CONCEPTEURS = [
@@ -30,11 +20,9 @@ export const AUTHORIZED_CONCEPTEURS = [
   },
 ] as const;
 
-export const SUPER_ADMIN_LOGIN_ROUTE =
-  '/hidden-concepteur-gate/login';
+export const SUPER_ADMIN_LOGIN_ROUTE = '/hidden-concepteur-gate/login';
 
-export const SUPER_ADMIN_DASHBOARD_ROUTE =
-  '/hidden-concepteur-gate/dashboard';
+export const SUPER_ADMIN_DASHBOARD_ROUTE = '/hidden-concepteur-gate/dashboard';
 
 export type SuperAdminCheck =
   | {
@@ -45,17 +33,12 @@ export type SuperAdminCheck =
   | {
       ok: false;
       reason:
-        | 'no-session'
-        | 'not-listed'
-        | 'read-error'
-        | 'no-row'
-        | 'inactive';
+        | 'no-session' |'not-listed' |'read-error' |'no-row' |'inactive';
       message: string;
     };
 
 export function findAuthorizedByEmail(email: string) {
   const normalized = email.trim().toLowerCase();
-
   return AUTHORIZED_CONCEPTEURS.find(
     (account) => account.email.toLowerCase() === normalized
   );
@@ -66,13 +49,6 @@ export function isAuthorizedUserId(userId: string): boolean {
     (account) => account.userId === userId
   );
 }
-
-/* ----------------------------------------------------------------------------
- * Vérification complète de l'utilisateur actuellement connecté.
- *
- * Ne lève jamais d'exception : renvoie toujours un objet décrivant le résultat.
- * Les pages peuvent ainsi décider quoi afficher sans try/catch partout.
- * -------------------------------------------------------------------------- */
 
 export async function checkCurrentSuperAdmin(): Promise<SuperAdminCheck> {
   const supabase = createClient();
@@ -86,7 +62,7 @@ export async function checkCurrentSuperAdmin(): Promise<SuperAdminCheck> {
     return {
       ok: false,
       reason: 'no-session',
-      message: "Aucune session active.",
+      message: 'Aucune session active.',
     };
   }
 
@@ -117,8 +93,7 @@ export async function checkCurrentSuperAdmin(): Promise<SuperAdminCheck> {
     return {
       ok: false,
       reason: 'no-row',
-      message:
-        "Aucune entrée SUPER ADMIN n'est associée à ce compte.",
+      message: "Aucune entrée SUPER ADMIN n'est associée à ce compte.",
     };
   }
 
@@ -140,11 +115,6 @@ export async function checkCurrentSuperAdmin(): Promise<SuperAdminCheck> {
   };
 }
 
-/* ----------------------------------------------------------------------------
- * Variante qui lève une exception — pratique pour les services de données du
- * dashboard, qui veulent interrompre net une requête non autorisée.
- * -------------------------------------------------------------------------- */
-
 export async function ensureSuperAdmin(): Promise<{
   userId: string;
   email: string | null;
@@ -160,31 +130,3 @@ export async function ensureSuperAdmin(): Promise<{
     email: result.email,
   };
 }
-function fetchProspectors(...args: any[]): any {
-  // eslint-disable-next-line no-console
-  console.warn('Placeholder: fetchProspectors is not implemented yet.', args);
-  return null;
-}
-
-export { fetchProspectors };
-function ProspectorRow(...args: any[]): any {
-  // eslint-disable-next-line no-console
-  console.warn('Placeholder: ProspectorRow is not implemented yet.', args);
-  return null;
-}
-
-export { ProspectorRow };
-function fetchRecentSales(...args: any[]): any {
-  // eslint-disable-next-line no-console
-  console.warn('Placeholder: fetchRecentSales is not implemented yet.', args);
-  return null;
-}
-
-export { fetchRecentSales };
-function RecentSaleRow(...args: any[]): any {
-  // eslint-disable-next-line no-console
-  console.warn('Placeholder: RecentSaleRow is not implemented yet.', args);
-  return null;
-}
-
-export { RecentSaleRow };
