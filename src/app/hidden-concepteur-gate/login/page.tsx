@@ -296,15 +296,6 @@ console.log(
 console.log(
   '===================================='
 );
-
-if (authData.session) {
-  const {
-    error: setSessionError,
-  } = await supabase.auth.setSession({
-    access_token: authData.session.access_token,
-    refresh_token: authData.session.refresh_token,
-  });
-
   console.log(
     'SET SESSION ERROR =',
     setSessionError
