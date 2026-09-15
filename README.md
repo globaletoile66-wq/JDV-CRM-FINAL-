@@ -29,7 +29,9 @@ JDV CRM est organisé autour de plusieurs espaces indépendants.
 
 Route :
 
+```text
 /
+```
 
 Le site présente JDV CRM, ses fonctionnalités, ses offres et permet à une entreprise de commencer son inscription.
 
@@ -39,9 +41,10 @@ Le site présente JDV CRM, ses fonctionnalités, ses offres et permet à une ent
 
 Routes principales :
 
+```text
 /terrain/login
 /terrain/dashboard
-
+```
 
 Cet espace est destiné aux prospecteurs travaillant sur le terrain.
 
@@ -64,9 +67,10 @@ Fonctionnalités principales :
 
 Routes principales :
 
+```text
 /business/login
 /business/dashboard
-
+```
 
 Cet espace permet à l'entreprise de gérer son activité.
 
@@ -93,9 +97,12 @@ Fonctionnalités principales :
 
 ### 4. 🔐 Espace SUPER ADMIN / CONCEPTEUR
 
-Route :
+Routes :
 
+```text
 /hidden-concepteur-gate/login
+/hidden-concepteur-gate/dashboard
+```
 
 Cet espace est volontairement masqué du parcours public.
 
@@ -117,12 +124,13 @@ L'accès est protégé par l'authentification Supabase et par le système `super
 
 ---
 
-# 🗄️ Base de données
+## 🗄️ Base de données
 
 JDV CRM utilise **Supabase PostgreSQL**.
 
 L'architecture principale repose sur :
 
+```text
 auth.users
      │
      ▼
@@ -133,9 +141,11 @@ organization_members
      │
      ▼
 organizations
+```
 
 Les principales tables métier comprennent notamment :
 
+```text
 organizations
 organization_members
 organization_settings
@@ -169,7 +179,7 @@ audit_logs
 
 ---
 
-# 🔐 Sécurité
+## 🔐 Sécurité
 
 JDV CRM utilise plusieurs niveaux de protection.
 
@@ -185,6 +195,7 @@ Supabase Authentication
 
 Les données sont isolées par :
 
+```text
 organization_id
 ```
 
@@ -202,9 +213,17 @@ super_admins
 
 Le simple fait d'être authentifié ne donne donc pas automatiquement les droits de SUPER ADMIN.
 
+La vérification côté serveur s'appuie sur la fonction PostgreSQL :
+
+```text
+verify_current_super_admin()
+```
+
+Cette fonction est déclarée `SECURITY DEFINER` et n'est exécutable que par le rôle `authenticated`.
+
 ---
 
-# 💳 Abonnements
+## 💳 Abonnements
 
 JDV CRM prévoit un système d'abonnement pour les entreprises.
 
@@ -221,9 +240,9 @@ Un système d'essai peut également être associé à une nouvelle organisation.
 
 ---
 
-# 📦 Installation
+## 📦 Installation
 
-## 1. Installer les dépendances
+### 1. Installer les dépendances
 
 ```bash
 npm install
@@ -231,10 +250,11 @@ npm install
 
 ---
 
-## 2. Configurer les variables d'environnement
+### 2. Configurer les variables d'environnement
 
 Créer un fichier :
 
+```text
 .env.local
 ```
 
@@ -243,16 +263,19 @@ avec les variables nécessaires à l'application.
 Exemple :
 
 ```env
-NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your_supabase_publishable_key
+NEXT_PUBLIC_SUPABASE_URL=https://votre-projet.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=votre_cle_anon
 NEXT_PUBLIC_SITE_URL=http://localhost:4028
 ```
+
+> ⚠️ Les noms de ces variables doivent correspondre exactement à ceux lus dans `src/lib/supabase/client.ts`.
+> Toute différence (majuscule, nom alternatif) empêche l'initialisation du client Supabase.
 
 **Ne jamais publier les clés secrètes dans le dépôt Git.**
 
 ---
 
-## 3. Lancer le serveur de développement
+### 3. Lancer le serveur de développement
 
 ```bash
 npm run dev
@@ -260,12 +283,13 @@ npm run dev
 
 L'application sera disponible sur :
 
+```text
 http://localhost:4028
 ```
 
 ---
 
-# 🛠️ Scripts disponibles
+## 🛠️ Scripts disponibles
 
 ### Développement
 
@@ -323,8 +347,9 @@ Formate automatiquement le code du projet.
 
 ---
 
-# 📁 Structure du projet
+## 📁 Structure du projet
 
+```text
 jdvcrm/
 │
 ├── public/
@@ -353,6 +378,7 @@ jdvcrm/
 │   │
 │   ├── lib/
 │   │   └── supabase/
+│   │       └── client.ts
 │   │
 │   └── styles/
 │
@@ -372,7 +398,7 @@ jdvcrm/
 
 ---
 
-# 🎨 Identité visuelle
+## 🎨 Identité visuelle
 
 L'interface JDV CRM utilise principalement :
 
@@ -394,7 +420,7 @@ L'objectif est de conserver une identité visuelle professionnelle, premium et a
 
 ---
 
-# 🌍 Internationalisation
+## 🌍 Internationalisation
 
 JDV CRM est conçu pour pouvoir évoluer vers une utilisation internationale.
 
@@ -409,12 +435,13 @@ L'architecture prévoit notamment :
 
 La langue par défaut actuelle est :
 
+```text
 Français
 ```
 
 ---
 
-# 🔄 Développement
+## 🔄 Développement
 
 Après toute modification importante du projet, il est recommandé d'exécuter :
 
@@ -428,7 +455,7 @@ Ces vérifications permettent de détecter les problèmes TypeScript, ESLint et 
 
 ---
 
-# 🚀 Déploiement
+## 🚀 Déploiement
 
 Pour préparer une version de production :
 
@@ -447,11 +474,11 @@ npm run start
 
 ---
 
-# ⚠️ Sécurité
+## ⚠️ Sécurité
 
 Ne jamais versionner les fichiers contenant des secrets :
 
-
+```text
 .env
 .env.local
 .env.production.local
@@ -463,7 +490,7 @@ Les opérations nécessitant des privilèges élevés doivent être réalisées 
 
 ---
 
-# 📌 Règles importantes du projet
+## 📌 Règles importantes du projet
 
 Lors des évolutions de JDV CRM :
 
@@ -474,13 +501,14 @@ Lors des évolutions de JDV CRM :
 5. Ne pas utiliser de comptes de démonstration à la place de l'authentification réelle.
 6. Ne jamais exposer de clés secrètes côté navigateur.
 7. Conserver les protections RLS.
-8. Vérifier TypeScript, ESLint et le build après les modifications importantes.
-9. Maintenir les espaces ADMIN, PROSPECTEUR et SUPER ADMIN séparés.
-10. Ne pas réintroduire les anciennes tables supprimées de l'architecture.
+8. Respecter la casse exacte des paquets npm (`@supabase/ssr`, `@supabase/supabase-js`).
+9. Vérifier TypeScript, ESLint et le build après les modifications importantes.
+10. Maintenir les espaces ADMIN, PROSPECTEUR et SUPER ADMIN séparés.
+11. Ne pas réintroduire les anciennes tables supprimées de l'architecture.
 
 ---
 
-# ❤️ JDV CRM
+## ❤️ JDV CRM
 
 **JDV CRM — Gestion commerciale, crédit client et prospection terrain.**
 
