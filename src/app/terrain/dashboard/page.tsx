@@ -461,13 +461,13 @@ function CollectTokenModal({
   onClose,
   onSuccess,
   userId,
-  enterpriseId,
+  organizationId,
 }: {
   state: CollectModalState;
   onClose: () => void;
   onSuccess: () => void;
   userId: string;
-  enterpriseId: string;
+  organizationId: string;
 }) {
   const [montant, setMontant] = useState('');
   const [mode, setMode] = useState<'cash' | 'mtn_money' | 'moov' | 'wave' | 'autre'>('cash');
