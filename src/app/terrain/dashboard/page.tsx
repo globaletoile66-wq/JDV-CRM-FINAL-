@@ -486,9 +486,10 @@ function CollectTokenModal({
       const supabase = createClient();
       const { error: insertError } = await supabase.from('payments').insert({
         organization_id: organizationId,
-        prospect_id: state.prospect.id,
         amount: parseFloat(montant),
+        recorded_by: userId,
         payment_method: mode,
+        status: 'successful',
         notes: notes || null,
       });
 
@@ -1311,6 +1312,7 @@ export default function TerrainDashboardPage() {
           onSuccess={() => setRefreshKey((k) => k + 1)}
           userId={userId}
           organizationId={organizationId}
+          portfolioId={portfolioId}
           articles={articles}
         />
       </div>
