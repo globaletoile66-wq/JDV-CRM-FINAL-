@@ -210,15 +210,17 @@ function NewLeadModal({
   onClose,
   onSuccess,
   userId,
-  enterpriseId,
+  organizationId,
+  portfolioId,
   articles,
 }: {
   open: boolean;
   onClose: () => void;
   onSuccess: () => void;
   userId: string;
-  enterpriseId: string;
-  articles: { id: string; nom_article: string; prix_total: number }[];
+  organizationId: string;
+  portfolioId: string;
+  articles: { id: string; name: string; fixed_price: number }[];
 }) {
   const [form, setForm] = useState<NewLeadForm>({
     identite: '',
@@ -245,18 +247,14 @@ function NewLeadModal({
       const supabase = createClient();
       const { data } = await supabase
         .from('prospects')
-        .select('id, created_by_user_id, created_at, users!prospects_created_by_user_id_fkey(full_name, code_prospecteur)')
-        .eq('enterprise_id', enterpriseId)
-        .eq('telephone', form.telephone)
+        .select('id, created_at')
+        .eq('organization_id', organizationId)
+        .eq('phone', form.telephone.trim())
+        .limit(1)
         .maybeSingle();
 
       if (data) {
-        const u = (data as any).users;
-        setAntiTheftOwner({
-          full_name: u?.full_name || null,
-          code_prospecteur: u?.code_prospecteur || null,
-          created_at: data.created_at,
-        });
+        setAntiTheftOwner({ full_name: 'Prospect déjà enregistré', code_prospecteur: null, created_at: data.created_at });
         setAntiTheftPhone(form.telephone);
       }
     } catch {
@@ -270,23 +268,29 @@ function NewLeadModal({
     e.preventDefault();
     setError('');
 
-    // Re-check phone before submit
+    const identity = form.identite.trim();
+    if (!identity) {
+      setError('Le nom complet du prospect est obligatoire.');
+      return;
+    }
+
+    if (!organizationId || !portfolioId) {
+      setError('Votre portefeuille commercial est introuvable. Reconnectez-vous ou contactez l’administrateur.');
+      return;
+    }
+
     if (form.telephone) {
       const supabase = createClient();
       const { data: existing } = await supabase
         .from('prospects')
-        .select('id, created_at, users!prospects_created_by_user_id_fkey(full_name, code_prospecteur)')
-        .eq('enterprise_id', enterpriseId)
-        .eq('telephone', form.telephone)
+        .select('id, created_at')
+        .eq('organization_id', organizationId)
+        .eq('phone', form.telephone.trim())
+        .limit(1)
         .maybeSingle();
 
       if (existing) {
-        const u = (existing as any).users;
-        setAntiTheftOwner({
-          full_name: u?.full_name || null,
-          code_prospecteur: u?.code_prospecteur || null,
-          created_at: existing.created_at,
-        });
+        setAntiTheftOwner({ full_name: 'Prospect déjà enregistré', code_prospecteur: null, created_at: existing.created_at });
         setAntiTheftPhone(form.telephone);
         return;
       }
@@ -295,21 +299,31 @@ function NewLeadModal({
     setLoading(true);
     try {
       const supabase = createClient();
-      const insertData: any = {
-        enterprise_id: enterpriseId,
-        created_by_user_id: userId,
-        identite: form.identite,
-        telephone: form.telephone || null,
-        geolocalisation: form.geolocalisation || null,
-        type_prospect: form.categorie,
-        categorie: form.categorie,
-        notes: form.notes || null,
-        montant_total: form.montant_total ? parseFloat(form.montant_total) : null,
-        date_rencontre: form.date_rencontre ? new Date(form.date_rencontre).toISOString() : null,
-        date_rendez_vous: form.date_rendez_vous ? new Date(form.date_rendez_vous).toISOString() : null,
-        date_dernier_contact: new Date().toISOString(),
+      const parts = identity.split(/\s+/);
+      const firstName = parts.shift() || identity;
+      const lastName = parts.length ? parts.join(' ') : null;
+      const estimatedAmount = form.montant_total ? parseFloat(form.montant_total) : null;
+      const selectedArticle = articles.find((a) => a.id === form.article_voulu_id);
+
+      const insertData = {
+        organization_id: organizationId,
+        portfolio_id: portfolioId,
+        prospecteur_id: null,
+        first_name: firstName,
+        last_name: lastName,
+        phone: form.telephone.trim() || null,
+        address: form.geolocalisation.trim() || null,
+        desired_article: selectedArticle?.name || null,
+        desired_article_id: form.article_voulu_id || null,
+        temperature: form.categorie,
+        visit_count: 1,
+        last_contact_at: new Date().toISOString(),
+        next_follow_up_at: form.date_rendez_vous ? new Date(form.date_rendez_vous).toISOString() : null,
+        status: 'new',
+        notes: form.notes.trim() || null,
+        estimated_amount: estimatedAmount,
+        purchase_date_planned: form.date_rencontre ? new Date(form.date_rencontre).toISOString().slice(0, 10) : null,
       };
-      if (form.article_voulu_id) insertData.article_voulu_id = form.article_voulu_id;
 
       const { error: insertError } = await supabase.from('prospects').insert(insertData);
       if (insertError) throw new Error(insertError.message);
@@ -319,10 +333,20 @@ function NewLeadModal({
         onSuccess();
         onClose();
         setSuccess(false);
-        setForm({ identite: '', telephone: '', geolocalisation: '', categorie: 'tiede', article_voulu_id: '', montant_total: '', date_rencontre: new Date().toISOString().split('T')[0], date_rendez_vous: '', notes: '' });
+        setForm({
+          identite: '',
+          telephone: '',
+          geolocalisation: '',
+          categorie: 'tiede',
+          article_voulu_id: '',
+          montant_total: '',
+          date_rencontre: new Date().toISOString().split('T')[0],
+          date_rendez_vous: '',
+          notes: '',
+        });
       }, 1200);
     } catch (err: any) {
-      setError(err.message || 'Erreur lors de l\'enregistrement');
+      setError(err.message || 'Erreur lors de l’enregistrement');
     } finally {
       setLoading(false);
     }
@@ -355,7 +379,6 @@ function NewLeadModal({
           onClick={(e) => e.stopPropagation()}
         >
           <div className="w-10 h-1 rounded-full mx-auto mb-5" style={{ background: 'rgba(212,175,55,0.4)' }} />
-
           <div className="flex items-center gap-3 mb-5">
             <span className="text-2xl">➕</span>
             <div>
@@ -363,7 +386,6 @@ function NewLeadModal({
               <p className="text-xs" style={{ color: '#A0AEC0' }}>Enregistrer un nouveau prospect</p>
             </div>
           </div>
-
           {success ? (
             <div className="rounded-2xl p-6 text-center" style={{ background: 'rgba(72,187,120,0.1)', border: '1px solid rgba(72,187,120,0.3)' }}>
               <div className="text-4xl mb-2">✅</div>
@@ -371,172 +393,57 @@ function NewLeadModal({
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
-              {/* Identité */}
               <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#A0AEC0' }}>
-                  Nom complet *
-                </label>
-                <input
-                  type="text"
-                  value={form.identite}
-                  onChange={(e) => setForm(f => ({ ...f, identite: e.target.value }))}
-                  placeholder="Prénom Nom du client"
-                  required
-                  className="w-full rounded-xl px-4 py-3 text-white text-sm outline-none"
-                  style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(212,175,55,0.25)', caretColor: '#D4AF37' }}
-                />
+                <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#A0AEC0' }}>Nom complet *</label>
+                <input type="text" value={form.identite} onChange={(e) => setForm(f => ({ ...f, identite: e.target.value }))} placeholder="Prénom Nom du client" required className="w-full rounded-xl px-4 py-3 text-white text-sm outline-none" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(212,175,55,0.25)', caretColor: '#D4AF37' }} />
               </div>
-
-              {/* Téléphone */}
               <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#A0AEC0' }}>
-                  Téléphone {checkingPhone && <span style={{ color: '#D4AF37' }}>— vérification...</span>}
-                </label>
-                <input
-                  type="tel"
-                  value={form.telephone}
-                  onChange={(e) => setForm(f => ({ ...f, telephone: e.target.value }))}
-                  onBlur={handlePhoneBlur}
-                  placeholder="+229 XX XX XX XX"
-                  className="w-full rounded-xl px-4 py-3 text-white text-sm outline-none"
-                  style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(212,175,55,0.25)', caretColor: '#D4AF37' }}
-                />
+                <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#A0AEC0' }}>Téléphone {checkingPhone && <span style={{ color: '#D4AF37' }}>— vérification...</span>}</label>
+                <input type="tel" value={form.telephone} onChange={(e) => setForm(f => ({ ...f, telephone: e.target.value }))} onBlur={handlePhoneBlur} placeholder="+229 XX XX XX XX" className="w-full rounded-xl px-4 py-3 text-white text-sm outline-none" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(212,175,55,0.25)', caretColor: '#D4AF37' }} />
               </div>
-
-              {/* Adresse */}
               <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#A0AEC0' }}>
-                  Adresse / Localisation
-                </label>
-                <input
-                  type="text"
-                  value={form.geolocalisation}
-                  onChange={(e) => setForm(f => ({ ...f, geolocalisation: e.target.value }))}
-                  placeholder="Quartier, ville, repère..."
-                  className="w-full rounded-xl px-4 py-3 text-white text-sm outline-none"
-                  style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(212,175,55,0.15)', caretColor: '#D4AF37' }}
-                />
+                <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#A0AEC0' }}>Adresse / Localisation</label>
+                <input type="text" value={form.geolocalisation} onChange={(e) => setForm(f => ({ ...f, geolocalisation: e.target.value }))} placeholder="Quartier, ville, repère..." className="w-full rounded-xl px-4 py-3 text-white text-sm outline-none" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(212,175,55,0.15)', caretColor: '#D4AF37' }} />
               </div>
-
-              {/* Catégorie */}
               <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#A0AEC0' }}>
-                  Catégorie
-                </label>
+                <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#A0AEC0' }}>Catégorie</label>
                 <div className="grid grid-cols-3 gap-2">
                   {(['chaud', 'tiede', 'froid'] as const).map((cat) => (
-                    <button
-                      key={cat}
-                      type="button"
-                      onClick={() => setForm(f => ({ ...f, categorie: cat }))}
-                      className="py-2 rounded-xl text-xs font-bold transition-all"
-                      style={{
-                        background: form.categorie === cat ? (cat === 'chaud' ? 'rgba(252,129,129,0.2)' : cat === 'tiede' ? 'rgba(246,224,94,0.15)' : 'rgba(99,179,237,0.15)') : 'rgba(255,255,255,0.03)',
-                        border: form.categorie === cat ? `1px solid ${cat === 'chaud' ? '#FC8181' : cat === 'tiede' ? '#F6E05E' : '#63B3ED'}` : '1px solid rgba(255,255,255,0.08)',
-                        color: form.categorie === cat ? (cat === 'chaud' ? '#FC8181' : cat === 'tiede' ? '#F6E05E' : '#63B3ED') : '#718096',
-                      }}
-                    >
+                    <button key={cat} type="button" onClick={() => setForm(f => ({ ...f, categorie: cat }))} className="py-2 rounded-xl text-xs font-bold transition-all" style={{ background: form.categorie === cat ? (cat === 'chaud' ? 'rgba(252,129,129,0.2)' : cat === 'tiede' ? 'rgba(246,224,94,0.15)' : 'rgba(99,179,237,0.15)') : 'rgba(255,255,255,0.03)', border: form.categorie === cat ? `1px solid ${cat === 'chaud' ? '#FC8181' : cat === 'tiede' ? '#F6E05E' : '#63B3ED'}` : '1px solid rgba(255,255,255,0.08)', color: form.categorie === cat ? (cat === 'chaud' ? '#FC8181' : cat === 'tiede' ? '#F6E05E' : '#63B3ED') : '#718096' }}>
                       {cat === 'chaud' ? '🔥 HOT' : cat === 'tiede' ? '⚡ WARM' : '❄️ COLD'}
                     </button>
                   ))}
                 </div>
               </div>
-
-              {/* Article */}
               {articles.length > 0 && (
                 <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#A0AEC0' }}>
-                    Article désiré
-                  </label>
-                  <select
-                    value={form.article_voulu_id}
-                    onChange={(e) => setForm(f => ({ ...f, article_voulu_id: e.target.value }))}
-                    className="w-full rounded-xl px-4 py-3 text-white text-sm outline-none"
-                    style={{ background: '#0B1B3D', border: '1px solid rgba(212,175,55,0.25)', caretColor: '#D4AF37' }}
-                  >
+                  <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#A0AEC0' }}>Article désiré</label>
+                  <select value={form.article_voulu_id} onChange={(e) => setForm(f => ({ ...f, article_voulu_id: e.target.value }))} className="w-full rounded-xl px-4 py-3 text-white text-sm outline-none" style={{ background: '#0B1B3D', border: '1px solid rgba(212,175,55,0.25)' }}>
                     <option value="">— Sélectionner un article —</option>
-                    {articles.map((a) => (
-                      <option key={a.id} value={a.id}>{a.nom_article}</option>
-                    ))}
+                    {articles.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
                   </select>
                 </div>
               )}
-
-              {/* Montant */}
               <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#A0AEC0' }}>
-                  Montant total (FCFA)
-                </label>
-                <input
-                  type="number"
-                  value={form.montant_total}
-                  onChange={(e) => setForm(f => ({ ...f, montant_total: e.target.value }))}
-                  placeholder="Ex: 25000"
-                  min="0"
-                  className="w-full rounded-xl px-4 py-3 text-white text-sm outline-none"
-                  style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(212,175,55,0.15)', caretColor: '#D4AF37' }}
-                />
+                <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#A0AEC0' }}>Montant estimé (FCFA)</label>
+                <input type="number" value={form.montant_total} onChange={(e) => setForm(f => ({ ...f, montant_total: e.target.value }))} placeholder="Ex: 25000" min="0" className="w-full rounded-xl px-4 py-3 text-white text-sm outline-none" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(212,175,55,0.15)', caretColor: '#D4AF37' }} />
               </div>
-
-              {/* Dates */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#A0AEC0' }}>
-                    Date rencontre
-                  </label>
-                  <input
-                    type="date"
-                    value={form.date_rencontre}
-                    onChange={(e) => setForm(f => ({ ...f, date_rencontre: e.target.value }))}
-                    className="w-full rounded-xl px-3 py-3 text-white text-sm outline-none"
-                    style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(212,175,55,0.15)', colorScheme: 'dark' }}
-                  />
+                  <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#A0AEC0' }}>Date rencontre</label>
+                  <input type="date" value={form.date_rencontre} onChange={(e) => setForm(f => ({ ...f, date_rencontre: e.target.value }))} className="w-full rounded-xl px-3 py-3 text-white text-sm outline-none" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(212,175,55,0.15)', colorScheme: 'dark' }} />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#A0AEC0' }}>
-                    Rendez-vous
-                  </label>
-                  <input
-                    type="date"
-                    value={form.date_rendez_vous}
-                    onChange={(e) => setForm(f => ({ ...f, date_rendez_vous: e.target.value }))}
-                    className="w-full rounded-xl px-3 py-3 text-white text-sm outline-none"
-                    style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(212,175,55,0.15)', colorScheme: 'dark' }}
-                  />
+                  <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#A0AEC0' }}>Rendez-vous / Relance</label>
+                  <input type="date" value={form.date_rendez_vous} onChange={(e) => setForm(f => ({ ...f, date_rendez_vous: e.target.value }))} className="w-full rounded-xl px-3 py-3 text-white text-sm outline-none" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(212,175,55,0.15)', colorScheme: 'dark' }} />
                 </div>
               </div>
-
-              {/* Notes */}
               <div>
-                <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#A0AEC0' }}>
-                  Notes
-                </label>
-                <textarea
-                  value={form.notes}
-                  onChange={(e) => setForm(f => ({ ...f, notes: e.target.value }))}
-                  placeholder="Observations, remarques..."
-                  rows={2}
-                  className="w-full rounded-xl px-4 py-3 text-white text-sm outline-none resize-none"
-                  style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(212,175,55,0.15)', caretColor: '#D4AF37' }}
-                />
+                <label className="block text-xs font-semibold uppercase tracking-wider mb-1.5" style={{ color: '#A0AEC0' }}>Notes</label>
+                <textarea value={form.notes} onChange={(e) => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Observations, remarques..." rows={2} className="w-full rounded-xl px-4 py-3 text-white text-sm outline-none resize-none" style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(212,175,55,0.15)', caretColor: '#D4AF37' }} />
               </div>
-
-              {error && (
-                <p className="text-xs rounded-lg px-3 py-2 text-center" style={{ color: '#FC8181', background: 'rgba(252,129,129,0.1)', border: '1px solid rgba(252,129,129,0.2)' }}>
-                  {error}
-                </p>
-              )}
-
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full py-4 rounded-2xl font-bold text-sm tracking-wider uppercase transition-all active:scale-95"
-                style={{
-                  background: loading ? 'rgba(212,175,55,0.3)' : 'linear-gradient(135deg, #D4AF37 0%, #F5E17A 40%, #D4AF37 60%, #A8860C 100%)',
-                  color: loading ? '#D4AF37' : '#0B1B3D',
-                  boxShadow: loading ? 'none' : '0 4px 20px rgba(212,175,55,0.3)',
-                }}
-              >
+              {error && <p className="text-xs rounded-lg px-3 py-2 text-center" style={{ color: '#FC8181', background: 'rgba(252,129,129,0.1)', border: '1px solid rgba(252,129,129,0.2)' }}>{error}</p>}
+              <button type="submit" disabled={loading} className="w-full py-4 rounded-2xl font-bold text-sm tracking-wider uppercase transition-all active:scale-95" style={{ background: loading ? 'rgba(212,175,55,0.3)' : 'linear-gradient(135deg, #D4AF37 0%, #F5E17A 40%, #D4AF37 60%, #A8860C 100%)', color: loading ? '#D4AF37' : '#0B1B3D', boxShadow: loading ? 'none' : '0 4px 20px rgba(212,175,55,0.3)' }}>
                 {loading ? 'Enregistrement...' : '➕ Enregistrer le Lead'}
               </button>
             </form>
@@ -577,21 +484,13 @@ function CollectTokenModal({
 
     try {
       const supabase = createClient();
-      const { error: insertError } = await supabase.from('paiements_terrain').insert({
-        enterprise_id: enterpriseId,
+      const { error: insertError } = await supabase.from('payments').insert({
+        organization_id: organizationId,
         prospect_id: state.prospect.id,
-        collected_by: userId,
-        montant: parseFloat(montant),
-        mode_paiement: mode,
+        amount: parseFloat(montant),
+        payment_method: mode,
         notes: notes || null,
       });
-
-      if (insertError) throw new Error(insertError.message);
-
-      await supabase
-        .from('prospects')
-        .update({ date_dernier_contact: new Date().toISOString() })
-        .eq('id', state.prospect.id);
 
       setSuccess(true);
       setTimeout(() => {
@@ -955,11 +854,12 @@ export default function TerrainDashboardPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<TabType>('chaud');
   const [prospects, setProspects] = useState<Prospect[]>([]);
-  const [articles, setArticles] = useState<{ id: string; nom_article: string; prix_total: number }[]>([]);
+  const [articles, setArticles] = useState<{ id: string; name: string; fixed_price: number }[]>([]);
   const [loading, setLoading] = useState(true);
   const [userName, setUserName] = useState('Agent');
   const [userId, setUserId] = useState('');
-  const [enterpriseId, setEnterpriseId] = useState('');
+  const [organizationId, setOrganizationId] = useState('');
+  const [portfolioId, setPortfolioId] = useState('');
   const [collectModal, setCollectModal] = useState<CollectModalState>({ open: false, prospect: null });
   const [newLeadOpen, setNewLeadOpen] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -975,64 +875,131 @@ export default function TerrainDashboardPage() {
       }
 
       const { data: profile } = await supabase
-        .from('users')
-        .select('full_name, enterprise_id, role')
+        .from('profiles')
+        .select('display_name, first_name, last_name, status')
         .eq('id', user.id)
-        .single();
+        .maybeSingle();
 
-      if (!profile || profile.role !== 'prospector') {
+      if (!profile || profile.status !== 'active') {
         router.push('/terrain/login');
         return;
       }
 
-      setUserName(profile.full_name || user.email?.split('@')[0] || 'Agent');
-      setUserId(user.id);
-      setEnterpriseId(profile.enterprise_id);
+      let organization: { id: string; name: string } | null = null;
+      const { data: ownedOrg } = await supabase
+        .from('organizations')
+        .select('id, name')
+        .eq('owner_user_id', user.id)
+        .limit(1)
+        .maybeSingle();
 
-      // Fetch articles
+      if (ownedOrg) {
+        organization = ownedOrg;
+      } else {
+        const { data: membership } = await supabase
+          .from('organization_members')
+          .select('organization_id')
+          .eq('user_id', user.id)
+          .eq('status', 'active')
+          .limit(1)
+          .maybeSingle();
+
+        if (membership?.organization_id) {
+          const { data: memberOrg } = await supabase
+            .from('organizations')
+            .select('id, name')
+            .eq('id', membership.organization_id)
+            .maybeSingle();
+          organization = memberOrg;
+        }
+      }
+
+      if (!organization) {
+        setLoading(false);
+        router.push('/terrain/login');
+        return;
+      }
+
+      const { data: portfolio } = await supabase
+        .from('client_portfolios')
+        .select('id')
+        .eq('organization_id', organization.id)
+        .eq('owner_user_id', user.id)
+        .eq('status', 'active')
+        .limit(1)
+        .maybeSingle();
+
+      if (!portfolio) {
+        setLoading(false);
+        console.error('Aucun portefeuille actif pour cet utilisateur.');
+        return;
+      }
+
+      setUserName(profile.display_name || [profile.first_name, profile.last_name].filter(Boolean).join(' ') || user.email?.split('@')[0] || 'Agent');
+      setUserId(user.id);
+      setOrganizationId(organization.id);
+      setPortfolioId(portfolio.id);
+
       const { data: articlesData } = await supabase
         .from('articles')
-        .select('id, nom_article, prix_total')
-        .eq('enterprise_id', profile.enterprise_id);
-      if (articlesData) setArticles(articlesData);
+        .select('id, name, fixed_price')
+        .eq('organization_id', organization.id)
+        .eq('active', true)
+        .order('name');
 
-      // Fetch prospects with article info and prospector info
-      const { data: prospectsData } = await supabase
+      if (articlesData) setArticles(articlesData as { id: string; name: string; fixed_price: number }[]);
+
+      const { data: prospectsData, error: prospectsError } = await supabase
         .from('prospects')
-        .select(`
-          id, identite, telephone, geolocalisation, categorie, type_prospect,
-          date_dernier_contact, date_achat_prevue, date_rencontre, date_rendez_vous,
-          notes, article_voulu_id, montant_total, created_by_user_id, created_at,
-          articles(nom_article),
-          users!prospects_created_by_user_id_fkey(full_name, code_prospecteur, secteur_assigne)
-        `)
-        .eq('enterprise_id', profile.enterprise_id)
-        .order('date_dernier_contact', { ascending: true, nullsFirst: true });
+        .select('id, organization_id, prospecteur_id, first_name, last_name, phone, address, desired_article, desired_article_id, temperature, visit_count, last_contact_at, next_follow_up_at, status, notes, estimated_amount, purchase_date_planned, created_at')
+        .eq('organization_id', organization.id)
+        .order('last_contact_at', { ascending: true, nullsFirst: true });
+
+      if (prospectsError) {
+        console.error('Erreur chargement prospects:', prospectsError);
+        throw prospectsError;
+      }
 
       if (prospectsData) {
-        const mapped: Prospect[] = prospectsData.map((p: any) => ({
-          id: p.id,
-          identite: p.identite,
-          telephone: p.telephone,
-          geolocalisation: p.geolocalisation,
-          categorie: (p.categorie || p.type_prospect || 'froid') as 'chaud' | 'tiede' | 'froid',
-          type_prospect: p.type_prospect,
-          date_dernier_contact: p.date_dernier_contact,
-          date_achat_prevue: p.date_achat_prevue,
-          date_rencontre: p.date_rencontre,
-          date_rendez_vous: p.date_rendez_vous,
-          notes: p.notes,
-          article_voulu_id: p.article_voulu_id,
-          article_nom: p.articles?.nom_article || null,
-          montant_total: p.montant_total || null,
-          daysSinceContact: daysSince(p.date_dernier_contact),
-          created_by_user_id: p.created_by_user_id,
-          prospector: p.users ? {
-            full_name: p.users.full_name,
-            code_prospecteur: p.users.code_prospecteur,
-            secteur_assigne: p.users.secteur_assigne,
-          } : null,
-        }));
+        const prospecteurIds = [...new Set(prospectsData.map((p: any) => p.prospecteur_id).filter(Boolean))];
+        let prospecteurMap: Record<string, any> = {};
+        if (prospecteurIds.length) {
+          const { data: prospecteursData } = await supabase
+            .from('prospecteurs')
+            .select('id, first_name, last_name, code, user_id')
+            .in('id', prospecteurIds);
+          (prospecteursData || []).forEach((pr: any) => {
+            prospecteurMap[pr.id] = pr;
+          });
+        }
+
+        const mapped: Prospect[] = prospectsData.map((p: any) => {
+          const pr = p.prospecteur_id ? prospecteurMap[p.prospecteur_id] : null;
+          const identity = [p.first_name, p.last_name].filter(Boolean).join(' ') || 'Prospect';
+          return {
+            id: p.id,
+            identite: identity,
+            telephone: p.phone,
+            geolocalisation: p.address,
+            categorie: (p.temperature || 'froid') as 'chaud' | 'tiede' | 'froid',
+            type_prospect: p.status || 'new',
+            date_dernier_contact: p.last_contact_at,
+            date_achat_prevue: p.purchase_date_planned,
+            date_rencontre: p.created_at,
+            date_rendez_vous: p.next_follow_up_at,
+            notes: p.notes,
+            article_voulu_id: p.desired_article_id,
+            article_nom: p.desired_article || undefined,
+            montant_total: p.estimated_amount,
+            daysSinceContact: daysSince(p.last_contact_at),
+            created_by_user_id: pr?.user_id || user.id,
+            prospector: pr ? {
+              full_name: [pr.first_name, pr.last_name].filter(Boolean).join(' ') || null,
+              code_prospecteur: pr.code || null,
+              secteur_assigne: null,
+            } : null,
+          };
+        });
         setProspects(mapped);
       }
     } catch (err) {
@@ -1056,7 +1023,7 @@ export default function TerrainDashboardPage() {
     const supabase = createClient();
     await supabase
       .from('prospects')
-      .update({ date_dernier_contact: new Date().toISOString() })
+      .update({ last_contact_at: new Date().toISOString(), updated_at: new Date().toISOString() })
       .eq('id', prospectId);
     setProspects((prev) =>
       prev.map((p) => p.id === prospectId ? { ...p, daysSinceContact: 0, date_dernier_contact: new Date().toISOString() } : p)
@@ -1334,7 +1301,8 @@ export default function TerrainDashboardPage() {
           onClose={() => setCollectModal({ open: false, prospect: null })}
           onSuccess={() => setRefreshKey((k) => k + 1)}
           userId={userId}
-          enterpriseId={enterpriseId}
+          organizationId={organizationId}
+          portfolioId={portfolioId}
         />
 
         <NewLeadModal
@@ -1342,7 +1310,7 @@ export default function TerrainDashboardPage() {
           onClose={() => setNewLeadOpen(false)}
           onSuccess={() => setRefreshKey((k) => k + 1)}
           userId={userId}
-          enterpriseId={enterpriseId}
+          organizationId={organizationId}
           articles={articles}
         />
       </div>
