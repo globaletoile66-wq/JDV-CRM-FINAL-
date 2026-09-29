@@ -1303,7 +1303,6 @@ export default function TerrainDashboardPage() {
           onSuccess={() => setRefreshKey((k) => k + 1)}
           userId={userId}
           organizationId={organizationId}
-          portfolioId={portfolioId}
         />
 
         <NewLeadModal
