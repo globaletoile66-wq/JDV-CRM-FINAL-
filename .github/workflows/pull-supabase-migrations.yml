@@ -27,7 +27,7 @@ jobs:
       - name: Install PostgreSQL client
         run: |
           sudo apt-get update
-          sudo apt-get install -y postgresql-client
+          sudo apt-get install -y postgresql-client dnsutils
 
       - name: Link JDV CRM Supabase
         env:
@@ -50,14 +50,29 @@ jobs:
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: |
           mkdir -p supabase/snapshots
+
+          # GitHub-hosted runners may prefer IPv6 while the Supabase direct
+          # database endpoint may not be reachable over IPv6 from the runner.
+          DB_HOST="db.arxhppptxeeyeexkdyjv.supabase.co"
+          DB_IPV4="$(dig +short A "$DB_HOST" | head -n 1)"
+
+          if [ -z "$DB_IPV4" ]; then
+            echo "No IPv4 address was returned for $DB_HOST."
+            echo "Trying the Supabase hostname directly as a fallback."
+            DB_IPV4="$DB_HOST"
+          else
+            echo "Using Supabase IPv4 endpoint: $DB_IPV4"
+          fi
+
           pg_dump \
-            --host=db.arxhppptxeeyeexkdyjv.supabase.co \
+            --host="$DB_IPV4" \
             --port=5432 \
             --username=postgres \
             --dbname=postgres \
             --schema-only \
             --no-owner \
             --no-privileges \
+            --sslmode=require \
             --file=supabase/snapshots/current_database_schema.sql
 
       - name: Write export manifest
