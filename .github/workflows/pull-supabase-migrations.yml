@@ -45,37 +45,55 @@ jobs:
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: |
+          set -euo pipefail
           mkdir -p supabase/snapshots
           supabase migration list --linked > supabase/snapshots/remote_migration_history.txt
 
-      - name: Export complete database schema through Supavisor
+      - name: Validate database connection URL
         env:
-          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-          PGSSLMODE: require
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          set -euo pipefail
+
+          test -n "$SUPABASE_DB_URL" || {
+            echo "Missing SUPABASE_DB_URL."
+            echo "Add the exact Session pooler connection string copied from Supabase Connect."
+            exit 1
+          }
+
+          case "$SUPABASE_DB_URL" in
+            postgres://*|postgresql://*) ;;
+            *)
+              echo "SUPABASE_DB_URL must start with postgres:// or postgresql://"
+              exit 1
+              ;;
+          esac
+
+          echo "Database URL format validated."
+          echo "The password is supplied only through the GitHub secret and is not printed."
+
+      - name: Preflight database connection
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          PGCONNECT_TIMEOUT: "20"
+        run: |
+          set -euo pipefail
+          psql "$SUPABASE_DB_URL" \
+            --no-password \
+            --command "SELECT current_database(), current_user, current_setting('server_version');"
+
+      - name: Export complete Supabase-compatible schema
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: |
           set -euo pipefail
           mkdir -p supabase/snapshots
 
-          DB_HOST="aws-0-eu-west-1.pooler.supabase.com"
-          DB_PORT="5432"
-          DB_USER="postgres.arxhppptxeeyeexkdyjv"
-          DB_IPV4="$(getent ahostsv4 "$DB_HOST" | awk 'NR==1 {print $1}')"
-
-          test -n "$DB_IPV4" || { echo "Could not resolve IPv4 for $DB_HOST"; exit 1; }
-
-          echo "Using Supavisor session endpoint: $DB_HOST:$DB_PORT"
-          echo "Using IPv4 address: $DB_IPV4"
-
-          PGHOST="$DB_HOST" \
-          PGHOSTADDR="$DB_IPV4" \
-          PGPORT="$DB_PORT" \
-          PGUSER="$DB_USER" \
-          PGDATABASE="postgres" \
-          pg_dump \
-            --schema-only \
-            --no-owner \
-            --no-privileges \
-            --file=supabase/snapshots/current_database_schema.sql
+          # Supabase's supported dump command uses pg_dump internally and
+          # applies Supabase-specific filtering for managed objects.
+          supabase db dump \
+            --db-url "$SUPABASE_DB_URL" \
+            --file supabase/snapshots/current_database_schema.sql
 
           test -s supabase/snapshots/current_database_schema.sql || {
             echo "Schema dump was empty."
