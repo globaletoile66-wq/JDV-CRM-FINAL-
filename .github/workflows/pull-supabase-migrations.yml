@@ -2,6 +2,9 @@ name: Export JDV CRM Supabase to GitHub
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/pull-supabase-migrations.yml"
 
 jobs:
   supabase-export:
@@ -51,9 +54,6 @@ jobs:
           PGSSLMODE: require
         run: |
           mkdir -p supabase/snapshots
-
-          # The direct Supabase database hostname is IPv6-only from this
-          # GitHub-hosted runner. Use Supavisor session mode over IPv4.
           pg_dump \
             --host=aws-0-eu-west-1.pooler.supabase.com \
             --port=5432 \
