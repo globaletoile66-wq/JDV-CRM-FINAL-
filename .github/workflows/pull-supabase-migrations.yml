@@ -1,12 +1,11 @@
-name: Pull JDV CRM Supabase migrations
+name: Export JDV CRM Supabase to GitHub
 
 on:
   workflow_dispatch:
 
 jobs:
-  db-pull:
+  supabase-export:
     runs-on: ubuntu-latest
-
     permissions:
       contents: write
 
@@ -14,23 +13,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Supabase CLI
-        run: npm install --global supabase
-
       - name: Verify Supabase secrets
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: |
-          test -n "$SUPABASE_ACCESS_TOKEN" || {
-            echo "Missing SUPABASE_ACCESS_TOKEN"
-            exit 1
-          }
+          test -n "$SUPABASE_ACCESS_TOKEN" || { echo "Missing SUPABASE_ACCESS_TOKEN"; exit 1; }
+          test -n "$SUPABASE_DB_PASSWORD" || { echo "Missing SUPABASE_DB_PASSWORD"; exit 1; }
 
-          test -n "$SUPABASE_DB_PASSWORD" || {
-            echo "Missing SUPABASE_DB_PASSWORD"
-            exit 1
-          }
+      - name: Install Supabase CLI
+        run: npm install --global supabase
+
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
 
       - name: Link JDV CRM Supabase
         env:
@@ -41,22 +38,60 @@ jobs:
             --project-ref arxhppptxeeyeexkdyjv \
             --password "$SUPABASE_DB_PASSWORD"
 
-      - name: Pull exact remote database schema
+      - name: Export exact remote migration history
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: |
-          supabase db pull --linked
+          mkdir -p supabase/snapshots
+          supabase migration list --linked > supabase/snapshots/remote_migration_history.txt
 
-      - name: Commit migrations to GitHub
+      - name: Export complete database schema
+        env:
+          PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: |
-          git config user.name "JDV CRM Migration Bot"
+          mkdir -p supabase/snapshots
+          pg_dump \
+            --host=db.arxhppptxeeyeexkdyjv.supabase.co \
+            --port=5432 \
+            --username=postgres \
+            --dbname=postgres \
+            --schema-only \
+            --no-owner \
+            --no-privileges \
+            --file=supabase/snapshots/current_database_schema.sql
+
+      - name: Write export manifest
+        run: |
+          cat > supabase/snapshots/README.md <<'EOF'
+          # JDV CRM - Supabase current-state snapshot
+
+          Source:
+          - Supabase project: arxhppptxeeyeexkdyjv
+          - Repository: globaletoile66-wq/JDV-CRM-FINAL-
+
+          Files:
+          - current_database_schema.sql: PostgreSQL schema-only dump of the remote database. It contains database objects such as tables, constraints, indexes, functions, triggers, views, policies and related schema definitions available to pg_dump. It intentionally contains no table data.
+          - remote_migration_history.txt: migration history reported by the linked Supabase project.
+
+          Safety:
+          - This workflow does not run supabase migration repair.
+          - It does not reset, drop or alter the Supabase database.
+          - It does not fabricate historical migration SQL.
+          - Production table data and live authentication records are not committed to GitHub.
+          - The seven existing historical migration SQL files remain untouched.
+
+          Important:
+          This snapshot represents the current database structure, not a reconstruction of every historical migration body.
+          EOF
+
+      - name: Commit Supabase snapshot to GitHub
+        run: |
+          git config user.name "JDV CRM Supabase Export Bot"
           git config user.email "actions@users.noreply.github.com"
-
-          git add supabase/migrations supabase/config.toml
-
+          git add supabase/snapshots
           if git diff --cached --quiet; then
-            echo "No migration changes detected."
+            echo "No Supabase snapshot changes detected."
           else
-            git commit -m "chore: pull exact JDV CRM Supabase migrations"
+            git commit -m "chore: snapshot current JDV CRM Supabase state"
             git push
           fi
