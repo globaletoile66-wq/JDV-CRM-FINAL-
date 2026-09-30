@@ -27,10 +27,10 @@ jobs:
       - name: Install Supabase CLI
         run: npm install --global supabase
 
-      - name: Install PostgreSQL client
+      - name: Install PostgreSQL client and jq
         run: |
           sudo apt-get update
-          sudo apt-get install -y postgresql-client
+          sudo apt-get install -y postgresql-client jq
 
       - name: Link JDV CRM Supabase
         env:
@@ -48,20 +48,48 @@ jobs:
           mkdir -p supabase/snapshots
           supabase migration list --linked > supabase/snapshots/remote_migration_history.txt
 
-      - name: Export complete database schema
+      - name: Resolve exact Supavisor connection and export schema
         env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           PGPASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-          PGSSLMODE: require
         run: |
+          set -euo pipefail
           mkdir -p supabase/snapshots
+
+          # Do not guess the pooler cluster index. Supabase documents that the
+          # pooler host must be copied from the project's connection config.
+          # The Management API returns the effective Supavisor host/user/port.
+          curl --fail --silent --show-error \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            "https://api.supabase.com/v1/projects/arxhppptxeeyeexkdyjv/config/database/pooler" \
+            > /tmp/pooler.json
+
+          SESSION_INFO="$(jq -r '
+            map(select(.pool_mode == "session"))
+            | .[0]
+            | [.db_host, (.db_port|tostring), .db_user]
+            | @tsv
+          ' /tmp/pooler.json)"
+
+          if [ -z "$SESSION_INFO" ] || [ "$SESSION_INFO" = $'null\tnull\tnull' ]; then
+            echo "Could not resolve the Supavisor session connection from Supabase."
+            exit 1
+          fi
+
+          IFS=$'\t' read -r DB_HOST DB_PORT DB_USER <<< "$SESSION_INFO"
+
+          echo "Resolved Supavisor session endpoint: $DB_HOST:$DB_PORT"
+          echo "Resolved database role: $DB_USER"
+
           pg_dump \
-            --host=aws-0-eu-west-1.pooler.supabase.com \
-            --port=5432 \
-            --username=postgres.arxhppptxeeyeexkdyjv \
+            --host="$DB_HOST" \
+            --port="$DB_PORT" \
+            --username="$DB_USER" \
             --dbname=postgres \
             --schema-only \
             --no-owner \
             --no-privileges \
+            --sslmode=require \
             --file=supabase/snapshots/current_database_schema.sql
 
       - name: Write export manifest
