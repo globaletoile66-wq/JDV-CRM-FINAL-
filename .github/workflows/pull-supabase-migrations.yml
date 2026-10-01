@@ -49,50 +49,19 @@ jobs:
           mkdir -p supabase/snapshots
           supabase migration list --linked > supabase/snapshots/remote_migration_history.txt
 
-      - name: Validate database connection URL
-        env:
-          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
-        run: |
-          set -euo pipefail
-
-          test -n "$SUPABASE_DB_URL" || {
-            echo "Missing SUPABASE_DB_URL."
-            echo "Add the exact Session pooler connection string copied from Supabase Connect."
-            exit 1
-          }
-
-          case "$SUPABASE_DB_URL" in
-            postgres://*|postgresql://*) ;;
-            *)
-              echo "SUPABASE_DB_URL must start with postgres:// or postgresql://"
-              exit 1
-              ;;
-          esac
-
-          echo "Database URL format validated."
-          echo "The password is supplied only through the GitHub secret and is not printed."
-
-      - name: Preflight database connection
-        env:
-          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
-          PGCONNECT_TIMEOUT: "20"
-        run: |
-          set -euo pipefail
-          psql "$SUPABASE_DB_URL" \
-            --no-password \
-            --command "SELECT current_database(), current_user, current_setting('server_version');"
-
       - name: Export complete Supabase-compatible schema
         env:
-          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
         run: |
           set -euo pipefail
           mkdir -p supabase/snapshots
 
-          # Supabase's supported dump command uses pg_dump internally and
-          # applies Supabase-specific filtering for managed objects.
+          # The project was linked above with the database password.
+          # Supabase CLI supports dumping the linked remote project directly.
+          # This is read-only: no migration is applied or repaired.
           supabase db dump \
-            --db-url "$SUPABASE_DB_URL" \
+            --linked \
             --file supabase/snapshots/current_database_schema.sql
 
           test -s supabase/snapshots/current_database_schema.sql || {
