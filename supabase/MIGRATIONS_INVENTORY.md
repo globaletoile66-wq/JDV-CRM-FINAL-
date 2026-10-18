@@ -1,0 +1,93 @@
+# JDV CRM — Supabase migration inventory
+
+Project: `arxhppptxeeyeexkdyjv` (CRM JDV)
+Captured: 2026-09-29
+
+The live database reports **70 applied migrations**. Their SQL bodies are not stored in GitHub, so this file records the authoritative migration history without fabricating historical SQL.
+
+| Version | Name |
+|---|---|
+20260915003307 | restrict_security_definer_rpc_access
+20260915003745 | add_rls_policies_permissions_tables
+20260915005553 | restrict_is_current_super_admin_anon
+20260915011406 | restore_authenticated_execute_grants
+20260916013415 | harden_core_role_rls
+20260916013723 | complete_advanced_inventory_rls
+20260916013753 | harden_security_definer_execution
+20260916013803 | secure_company_onboarding_rpc
+20260916013821 | secure_public_crm_views
+20260916013921 | consolidate_safe_duplicate_triggers
+20260916013955 | secure_subscription_data_access
+20260916014459 | harden_company_registration_security
+20260916014705 | harden_credit_payment_frequencies
+20260916014816 | harden_stock_integrity_and_mutation
+20260916014934 | harden_purchase_receipts_and_inventory_flow
+20260916015041 | harden_returns_refunds
+20260916015154 | normalize_payment_financial_statuses
+20260916015312 | harden_serial_traceability
+20260916015624 | fix_return_stock_routing_and_idempotency
+20260916015641 | restrict_return_function_execute_privileges
+20260916015801 | harden_serialized_sales_returns_v2
+20260916015812 | restrict_return_processing_roles_v1
+20260916015949 | complete_secure_warehouse_transfers_v1
+20260916020100 | harden_supplier_purchase_receipt_payment_flow_v2
+20260916020258 | complete_global_stock_integrity_v2
+20260916020445 | harden_clients_prospects_prospecteurs_v1
+20260916020456 | secure_prospect_archive_and_trigger_functions_v1
+20260916020513 | add_crm_lifecycle_constraints_v1
+20260916020717 | secure_sales_credit_payments_commissions_v1
+20260916020725 | lock_financial_trigger_functions_v1
+20260916020753 | clean_sales_financial_rls_v1
+20260916020806 | restore_sales_prospecteur_rls_v1
+20260916020903 | harden_late_unpaid_followups_commission_settlement_v1
+20260916020953 | add_secure_financial_dashboard_v1
+20260916021051 | add_secure_crm_reports_v1
+20260916021454 | add_financial_dashboard_views_v1
+20260916022215 | harden_subscription_source_of_truth_v1
+20260916022336 | harden_subscription_payment_webhook_events_v1
+20260916022555 | secure_subscription_limits_v1
+20260916022659 | complete_subscription_lifecycle_v1
+20260916022755 | secure_subscription_webhook_processing_v1
+20260916022910 | add_subscription_access_guard_v1
+20260916023014 | enforce_active_subscription_business_rls_v1
+20260916023038 | harden_subscription_access_guard_v1
+20260916023549 | harden_global_function_execute_permissions_v1
+20260916023642 | harden_audit_integrity_v1
+20260916023653 | close_audit_trigger_execute_surface_v1
+20260916023752 | harden_role_permission_grants_and_member_escalation_v1
+20260916023804 | close_anonymous_authorization_catalog_access_v1
+20260916023827 | harden_public_exposure_and_views_v1
+20260916023857 | harden_public_function_execution_defaults_v1
+20260916023939 | lock_down_future_public_object_defaults_v1
+20260916024017 | audit_membership_role_changes_v1
+20260916024035 | consolidate_super_admin_module_updated_at_trigger_v1
+20260916024050 | remove_exact_duplicate_crm_indexes_v1
+20260916024310 | final_business_integrity_constraints_v1
+20260916024607 | lock_down_direct_trigger_function_execution_v1
+20260916024641 | close_unscoped_legacy_maintenance_rpc_execution_v1
+20260916024838 | finalize_owner_and_membership_escalation_guards_v1
+20260916024847 | lock_down_private_guard_function_execution_v1
+20260916030758 | correction_confirmation_paiement_fedapay_v2
+20260916053823 | harden_super_admin_security_helpers
+20260916054145 | seed_meridian_demo_data_safe
+20260916054205 | pin_mutable_jdv_function_search_paths
+20260916054412 | terrain_prospecting_trial_logic_fix
+20260916054442 | terrain_prospecting_trial_logic_v2
+20260916054446 | harden_late_schedule_rpc
+20260916054715 | add_platform_super_admin_romaric
+20260916054737 | harden_subscription_status_sync_authorization_v1
+20260916055709 | extend_prospects_full_lead_management_20260910230000
+20260916195656 | remove_legacy_unused_subscriptions_tables
+20260916200247 | remove_orphaned_super_admin_rpc_duplicates
+20260916200735 | remove_orphaned_business_logic_duplicates
+20260929042951 | restrict_platform_rights_to_super_admin
+
+## Current-state files
+
+- `supabase/schema/current_state_baseline.sql`: non-destructive current-state table baseline captured from Supabase.
+- This baseline does **not** replace the 70 historical migrations.
+- No live Supabase data was exported or modified by this GitHub commit.
+
+## To obtain the exact historical SQL
+
+The authoritative SQL source must be pulled from the live project with the Supabase CLI (`supabase db pull`) in an authenticated environment. This is deliberately not fabricated from migration names.

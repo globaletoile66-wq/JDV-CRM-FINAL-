@@ -17,21 +17,19 @@ export default function TerrainLoginPage() {
     try {
       const supabase = createClient();
 
-      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
+      const { data: authData, error: authError } =
+        await supabase.auth.signInWithPassword({
+          email: email.trim(),
+          password,
+        });
 
-      if (authError) {
+      if (authError || !authData.user) {
         throw new Error('Identifiants incorrects. Vérifiez votre email et mot de passe.');
-      }
-
-      if (!authData.user) {
-        throw new Error('Connexion échouée. Réessayez.');
       }
 
       const userId = authData.user.id;
 
+ rocket-update
       const { data: membership, error: membershipError } = await supabase
         .from('organization_members')
         .select('organization_id, role, status')
@@ -68,9 +66,66 @@ export default function TerrainLoginPage() {
         localStorage.setItem('jdvcrm_prospecteur_code', prospecteur.code || '');
       } catch {
         // Le stockage local est optionnel.
+=======
+      const { data: profile, error: profileError } = await supabase
+        .from('profiles')
+        .select('id, display_name, first_name, last_name, status')
+        .eq('id', userId)
+        .maybeSingle();
+
+      if (profileError || !profile || profile.status !== 'active') {
+        await supabase.auth.signOut();
+        throw new Error('Profil JDV CRM introuvable ou inactif.');
       }
 
-      // Use replace to avoid back-button issues
+      const { data: ownedOrg } = await supabase
+        .from('organizations')
+        .select('id')
+        .eq('owner_user_id', userId)
+        .limit(1)
+        .maybeSingle();
+
+      let organizationId = ownedOrg?.id || '';
+
+      if (!organizationId) {
+        const { data: membership } = await supabase
+          .from('organization_members')
+          .select('organization_id')
+          .eq('user_id', userId)
+          .eq('status', 'active')
+          .limit(1)
+          .maybeSingle();
+
+        organizationId = membership?.organization_id || '';
+      }
+
+      if (!organizationId) {
+        await supabase.auth.signOut();
+        throw new Error('Aucune organisation active n’est associée à ce compte.');
+      }
+
+      const { data: portfolio } = await supabase
+        .from('client_portfolios')
+        .select('id')
+        .eq('organization_id', organizationId)
+        .eq('owner_user_id', userId)
+        .eq('status', 'active')
+        .limit(1)
+        .maybeSingle();
+
+      if (!portfolio) {
+        await supabase.auth.signOut();
+        throw new Error('Aucun portefeuille commercial actif n’est associé à ce compte.');
+      }
+
+      try {
+        localStorage.setItem('jdvcrm_organization_id', organizationId);
+        localStorage.setItem('jdvcrm_portfolio_id', portfolio.id);
+      } catch {
+        // localStorage may not be available
+ main
+      }
+
       window.location.replace('/terrain/dashboard');
     } catch (err: any) {
       setError(err.message || 'Une erreur est survenue. Réessayez.');
@@ -78,10 +133,6 @@ export default function TerrainLoginPage() {
     }
   };
 
-  const fillDemo = () => {
-    setEmail('kwame@meridian.com');
-    setPassword('agent123');
-  };
 
   return (
     <div
@@ -199,24 +250,6 @@ export default function TerrainLoginPage() {
               {loading ? 'Authentification...' : 'Accéder à Mon Tableau de Bord'}
             </button>
           </form>
-
-          <div className="mt-5 pt-4 border-t" style={{ borderColor: 'rgba(212,175,55,0.1)' }}>
-            <p className="text-xs text-center mb-2" style={{ color: '#4A5568' }}>
-              Compte de démonstration :
-            </p>
-            <button
-              type="button"
-              onClick={fillDemo}
-              className="w-full py-2 rounded-lg text-xs font-semibold transition-all"
-              style={{
-                color: '#D4AF37',
-                border: '1px solid rgba(212,175,55,0.2)',
-                background: 'rgba(212,175,55,0.05)',
-              }}
-            >
-              kwame@meridian.com / agent123
-            </button>
-          </div>
 
           <p className="text-center text-xs mt-4" style={{ color: '#4A5568' }}>
             Contactez votre superviseur en cas de problème d&apos;accès
