@@ -1,26 +1,40 @@
 'use client';
 
 import { createBrowserClient } from '@supabase/ssr';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
-export function createClient() {
-  const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || '')?.trim();
-  const anonKey = (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '')?.trim();
-  const publishableKey = (process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || '')?.trim();
+let browserClient: SupabaseClient | null = null;
 
-  // Prefer anon key, fall back to publishable key
-  const supabaseKey = anonKey || publishableKey;
-
-  if (!supabaseUrl) {
-    throw new Error(
-      "NEXT_PUBLIC_SUPABASE_URL est manquante dans les variables d'environnement.",
-    );
+function required(...names: string[]): string {
+  for (const name of names) {
+    const value = (process.env[name] ?? '').trim();
+    if (value) return value;
   }
-
-  if (!supabaseKey) {
-    throw new Error(
-      "NEXT_PUBLIC_SUPABASE_ANON_KEY est manquante dans les variables d'environnement.",
-    );
-  }
-
-  return createBrowserClient(supabaseUrl, supabaseKey);
+  throw new Error(`[JDV CRM] ${names.join(' ou ')} est manquante.`);
 }
+
+export function createClient(): SupabaseClient {
+  if (browserClient) return browserClient;
+
+  const url = required('NEXT_PUBLIC_SUPABASE_URL');
+  const key = required(
+    'NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY',
+    'NEXT_PUBLIC_SUPABASE_ANON_KEY'
+  );
+
+  if (!/^https?:\/\/[a-z0-9-]+\.supabase\.co(?:\/.*)?$/i.test(url)) {
+    throw new Error('[JDV CRM] NEXT_PUBLIC_SUPABASE_URL est invalide.');
+  }
+
+  browserClient = createBrowserClient(url, key, {
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: true,
+    },
+  });
+
+  return browserClient;
+}
+
+export const getSupabaseClient = createClient;

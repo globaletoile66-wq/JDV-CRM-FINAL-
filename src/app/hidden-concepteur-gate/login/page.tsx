@@ -1,526 +1,943 @@
-'use client';
-
-import React, { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
+import { ensureSuperAdmin } from '@/lib/auth/super-admin';
 
-/**
- * ============================================================
- * COMPTES CONCEPTEURS AUTORISÉS
- * ============================================================
+/* ============================================================================
+ * JDV CRM — SERVICE SUPER ADMIN
  *
- * Ces informations correspondent aux utilisateurs présents
- * dans Supabase Authentication.
+ * CHANGEMENTS IMPORTANTS PAR RAPPORT À LA VERSION PRÉCÉDENTE
  *
- * 1. romarica15@gmail.com
- *    UID : 57e90659-4ace-4824-aa4f-de84317622e8
+ * 1. Le client Supabase n'est plus créé au niveau du module.
+ *    Avant : `const supabase = createClient();` en haut du fichier.
+ *    Ce code s'exécutait à l'import, souvent avant que la session ne soit
+ *    hydratée, et figeait une instance sans session valide.
+ *    Maintenant : `const supabase = createClient();` à l'intérieur de chaque
+ *    fonction (le client est un singleton, donc c'est gratuit).
  *
- * 2. ets.miracle.jdv@gmail.com
- *    UID : 2e2b8bd7-d736-4e75-ab21-9e6e7b5cb1a1
+ * 2. `ensureSuperAdmin()` est importé du helper partagé au lieu d'être
+ *    redéfini ici avec des critères légèrement différents. Le dashboard et la
+ *    page de connexion appliquent désormais exactement la même règle.
  *
- * NE PAS MODIFIER LES UID.
- */
-const AUTHORIZED_CONCEPTEURS = [
-  {
-    email: 'romarica15@gmail.com',
-    userId: '57e90659-4ace-4824-aa4f-de84317622e8',
-  },
-  {
-    email: 'ets.miracle.jdv@gmail.com',
-    userId: '2e2b8bd7-d736-4e75-ab21-9e6e7b5cb1a1',
-  },
-] as const;
+ * 3. Correction du doublon 'blocked' dans SUSPENDED_STATUSES.
+ *
+ * 4. `fetchSuperAdminDashboard()` n'appelle plus `ensureSuperAdmin()` en
+ *    cascade avec chaque sous-fonction : une seule vérification en tête,
+ *    au lieu de six appels redondants.
+ * ========================================================================== */
 
-export default function ConcepteurLoginPage() {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
+/* =========================================================
+   TYPES
+========================================================= */
 
-  /**
-   * ============================================================
-   * AUTHENTIFICATION
-   * ============================================================
-   */
-  const handleLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
+export interface EnterpriseRow {
+  id: string;
+  nom_entreprise: string;
+  status_abonnement:
+    | 'active'
+    | 'pending'
+    | 'suspendu'
+    | 'trial'
+    | 'expired';
+  date_fin_abonnement: string | null;
+  trial_start_date: string | null;
+  trial_end_date: string | null;
+  created_at: string;
+  ownerEmail: string;
+  prospectorCount: number;
+  mrr: string;
+  tier: 'Entreprise' | 'Professionnel' | 'Démarrage';
+  terrainRevenue: number;
+  dailyRevenue: number;
+}
 
-    if (loading) return;
+export interface SuperAdminKPIs {
+  total: number;
+  active: number;
+  suspended: number;
+  pending: number;
+}
 
-    setError('');
-    setLoading(true);
+export interface FinancialAnalytics {
+  totalRevenue: number;
+  monthlyRevenue: number;
+  paymentCount: number;
+  activeSubscriptions: number;
+}
 
-    try {
-      const supabase = createClient();
+/* =========================================================
+   INTERNAL TYPES
+========================================================= */
 
-      /**
-       * --------------------------------------------------------
-       * 1. NORMALISATION DE L'EMAIL
-       * --------------------------------------------------------
-       */
-      const normalizedEmail = email.trim().toLowerCase();
+interface OrganizationRow {
+  id: string;
+  name: string;
+  email: string | null;
+  status: string;
+  subscription_status: string;
+  created_at: string;
+}
 
-      if (!normalizedEmail) {
-        throw new Error('Veuillez saisir votre adresse e-mail.');
-      }
+interface ProspecteurRow {
+  id: string;
+  organization_id: string;
+  status: string;
+}
 
-      if (!password) {
-        throw new Error('Veuillez saisir votre mot de passe.');
-      }
+interface OrganizationSubscriptionRow {
+  id: string;
+  organization_id: string;
+  plan_id: string;
+  status: string;
+  started_at: string | null;
+  expires_at: string | null;
+  created_at: string;
+}
 
-      /**
-       * --------------------------------------------------------
-       * 2. VÉRIFICATION DE L'EMAIL AUTORISÉ
-       * --------------------------------------------------------
-       */
-      const authorizedAccount = AUTHORIZED_CONCEPTEURS.find(
-        (account) =>
-          account.email.toLowerCase() === normalizedEmail
-      );
+interface SubscriptionPlanRow {
+  id: string;
+  code: string;
+  name: string;
+  price: number | string;
+  currency: string;
+  duration_days: number;
+}
 
-      if (!authorizedAccount) {
-        throw new Error(
-          'Accès refusé. Cette adresse e-mail n’est pas autorisée pour le portail concepteur.'
-        );
-      }
+interface PaymentRow {
+  organization_id: string;
+  amount: number | string;
+  currency: string;
+  status: string;
+  payment_date: string;
+  created_at: string;
+}
 
-      /**
-       * --------------------------------------------------------
-       * 3. AUTHENTIFICATION SUPABASE
-       * --------------------------------------------------------
-       */
-      const {
-        data: authData,
-        error: authError,
-      } = await supabase.auth.signInWithPassword({
-        email: normalizedEmail,
-        password,
-      });
+interface DailyTokenRow {
+  organization_id: string;
+  paid_amount: number | string;
+  status: string;
+  token_date: string;
+  paid_at: string | null;
+}
 
-      if (authError) {
-        console.error(
-          'SUPABASE AUTH ERROR:',
-          authError
-        );
+interface SubscriptionPaymentRow {
+  amount: number | string;
+  currency: string;
+  status: string;
+  paid_at: string | null;
+  created_at: string;
+}
 
-        /**
-         * Message clair lorsque le mot de passe/email
-         * est incorrect dans Supabase Authentication.
-         */
-        if (
-          authError.message
-            ?.toLowerCase()
-            .includes('invalid login credentials')
-        ) {
-          throw new Error(
-            'Identifiants incorrects. Vérifiez le mot de passe de ce compte Supabase.'
-          );
-        }
+/* =========================================================
+   CONSTANTES
+========================================================= */
 
-        throw new Error(
-          authError.message ||
-            'Supabase a refusé l’authentification.'
-        );
-      }
+const SUCCESSFUL_PAYMENT_STATUSES = [
+  'success',
+  'successful',
+  'paid',
+  'completed',
+];
 
-      /**
-       * --------------------------------------------------------
-       * 4. VÉRIFICATION DE L'UTILISATEUR AUTHENTIFIÉ
-       * --------------------------------------------------------
-       */
-      if (!authData?.user) {
-        throw new Error(
-          'Supabase n’a retourné aucun utilisateur authentifié.'
-        );
-      }
+const ACTIVE_SUBSCRIPTION_STATUSES = ['active'];
 
-      const authenticatedUserId =
-        authData.user.id;
+const TRIAL_SUBSCRIPTION_STATUSES = ['trial', 'trialing'];
 
-      /**
-       * --------------------------------------------------------
-       * 5. VÉRIFICATION STRICTE DE L'UID
-       * --------------------------------------------------------
-       */
-      if (
-        authenticatedUserId !==
-        authorizedAccount.userId
-      ) {
-        console.error(
-          'UID CONCEPTEUR NON AUTORISÉ:',
-          authenticatedUserId
-        );
+const SUSPENDED_STATUSES = [
+  'suspended',
+  'suspendu',
+  'blocked',
+];
 
-        await supabase.auth.signOut();
+const PENDING_STATUSES = [
+  'pending',
+  'inactive',
+  'past_due',
+  'cancelled',
+  'canceled',
+];
 
-        throw new Error(
-          'Accès refusé. Le compte Supabase utilisé ne correspond pas à l’UID du concepteur autorisé.'
-        );
-      }
+/* =========================================================
+   HELPERS
+========================================================= */
 
-      /**
-       * --------------------------------------------------------
-       * 6. VÉRIFICATION DANS super_admins
-       * --------------------------------------------------------
-       */
-      const {
-        data: superAdmin,
-        error: superAdminError,
-      } = await supabase
-        .from('super_admins')
-        .select(
-          'id, user_id, status, actif'
-        )
-        .eq(
-          'user_id',
-          authenticatedUserId
-        )
-        .eq(
-          'status',
-          'active'
-        )
-        .maybeSingle();
-
-      /**
-       * --------------------------------------------------------
-       * 7. ERREUR DATABASE
-       * --------------------------------------------------------
-       */
-      if (superAdminError) {
-        console.error(
-          'SUPER ADMIN DATABASE ERROR:',
-          superAdminError
-        );
-
-        await supabase.auth.signOut();
-
-        throw new Error(
-          'Impossible de vérifier les autorisations SUPER ADMIN. Vérifiez la table super_admins et ses politiques RLS.'
-        );
-      }
-
-      /**
-       * --------------------------------------------------------
-       * 8. COMPTE ABSENT DE super_admins
-       * --------------------------------------------------------
-       */
-      if (!superAdmin) {
-        await supabase.auth.signOut();
-
-        throw new Error(
-          'Accès refusé. Ce compte existe dans Supabase Authentication mais ne possède pas encore les droits SUPER ADMIN dans JDV CRM.'
-        );
-      }
-
-      /**
-       * --------------------------------------------------------
-       * 9. COMPTE DÉSACTIVÉ
-       * --------------------------------------------------------
-       */
-      if (superAdmin.actif !== true) {
-        await supabase.auth.signOut();
-
-        throw new Error(
-          'Ce compte SUPER ADMIN est actuellement désactivé.'
-        );
-      }
-
-      /**
-       * --------------------------------------------------------
-       * 10. VÉRIFICATION FINALE DU STATUT
-       * --------------------------------------------------------
-       */
-      if (superAdmin.status !== 'active') {
-        await supabase.auth.signOut();
-
-        throw new Error(
-          'Le compte SUPER ADMIN n’est pas actif.'
-        );
-      }
-
-      /**
-       * --------------------------------------------------------
-       * 11. CONNEXION RÉUSSIE
-       * --------------------------------------------------------
-       */
-      console.log(
-        'CONCEPTEUR AUTHENTIFIÉ:',
-        authenticatedUserId
-      );
-
-      window.location.replace(
-        '/hidden-concepteur-gate/dashboard'
-      );
-    } catch (err: unknown) {
-      console.error(
-        'CONCEPTEUR LOGIN ERROR:',
-        err
-      );
-
-      const message =
-        err instanceof Error
-          ? err.message
-          : 'Une erreur est survenue pendant l’authentification.';
-
-      setError(message);
-      setLoading(false);
-    }
+function emptyKPIs(): SuperAdminKPIs {
+  return {
+    total: 0,
+    active: 0,
+    suspended: 0,
+    pending: 0,
   };
+}
 
-  /**
-   * ============================================================
-   * SÉLECTION RAPIDE D'UN COMPTE
-   * ============================================================
-   */
-  const selectAccount = (accountEmail: string) => {
-    setEmail(accountEmail);
-    setPassword('');
-    setError('');
+function emptyFinancialAnalytics(): FinancialAnalytics {
+  return {
+    totalRevenue: 0,
+    monthlyRevenue: 0,
+    paymentCount: 0,
+    activeSubscriptions: 0,
   };
+}
 
-  /**
-   * ============================================================
-   * INTERFACE
-   * ============================================================
-   */
-  return (
-    <div
-      className="min-h-screen flex items-center justify-center px-4"
-      style={{
-        background: '#000000',
-        backgroundImage:
-          'radial-gradient(circle, rgba(212,175,55,0.04) 1px, transparent 1px)',
-        backgroundSize: '30px 30px',
-      }}
-    >
-      <div className="w-full max-w-sm">
-        <div
-          className="rounded-2xl p-8"
-          style={{
-            background: '#050A14',
-            border:
-              '1px solid rgba(212,175,55,0.2)',
-            boxShadow:
-              '0 0 60px rgba(212,175,55,0.05), 0 8px 40px rgba(0,0,0,0.8)',
-          }}
-        >
-          {/* =====================================================
-              HEADER
-          ====================================================== */}
-          <div className="text-center mb-8">
-            <p
-              className="text-xs tracking-[0.4em] uppercase font-semibold"
-              style={{
-                color: '#D4AF37',
-              }}
-            >
-              System Access
-            </p>
+function toNumber(value: unknown): number {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
 
-            <div
-              className="w-8 h-px mx-auto mt-3"
-              style={{
-                background:
-                  'rgba(212,175,55,0.3)',
-              }}
-            />
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
 
-            <p
-              className="text-[10px] uppercase tracking-widest mt-4"
-              style={{
-                color: '#4A5568',
-              }}
-            >
-              JDV CRM · Concepteur
-            </p>
-          </div>
+  return 0;
+}
 
-          {/* =====================================================
-              FORMULAIRE
-          ====================================================== */}
-          <form
-            onSubmit={handleLogin}
-            className="space-y-5"
-          >
-            {/* EMAIL */}
-            <div>
-              <label
-                className="block text-xs font-semibold uppercase tracking-wider mb-2"
-                style={{
-                  color: '#4A5568',
-                }}
-              >
-                Email du concepteur
-              </label>
-
-              <input
-                type="email"
-                value={email}
-                onChange={(e) =>
-                  setEmail(e.target.value)
-                }
-                placeholder="romarica15@gmail.com"
-                required
-                autoComplete="username"
-                disabled={loading}
-                className="w-full rounded-xl px-4 py-3 text-white text-sm outline-none transition-all"
-                style={{
-                  background:
-                    'rgba(255,255,255,0.03)',
-                  border:
-                    '1px solid rgba(212,175,55,0.15)',
-                  caretColor: '#D4AF37',
-                  opacity: loading ? 0.6 : 1,
-                }}
-              />
-            </div>
-
-            {/* PASSWORD */}
-            <div>
-              <label
-                className="block text-xs font-semibold uppercase tracking-wider mb-2"
-                style={{
-                  color: '#4A5568',
-                }}
-              >
-                Mot de passe
-              </label>
-
-              <input
-                type="password"
-                value={password}
-                onChange={(e) =>
-                  setPassword(e.target.value)
-                }
-                placeholder="••••••••••••••"
-                required
-                autoComplete="current-password"
-                disabled={loading}
-                className="w-full rounded-xl px-4 py-3 text-white text-sm outline-none transition-all"
-                style={{
-                  background:
-                    'rgba(255,255,255,0.03)',
-                  border:
-                    '1px solid rgba(212,175,55,0.15)',
-                  caretColor: '#D4AF37',
-                  opacity: loading ? 0.6 : 1,
-                }}
-              />
-            </div>
-
-            {/* ERREUR */}
-            {error && (
-              <div
-                className="text-xs text-center rounded-lg px-3 py-3"
-                style={{
-                  color: '#FC8181',
-                  background:
-                    'rgba(252,129,129,0.08)',
-                  border:
-                    '1px solid rgba(252,129,129,0.2)',
-                  lineHeight: '1.5',
-                }}
-              >
-                {error}
-              </div>
-            )}
-
-            {/* AVERTISSEMENT */}
-            <p
-              className="text-xs text-center"
-              style={{
-                color: '#7B2D2D',
-              }}
-            >
-              ⚠ Unauthorized access is monitored
-              and prosecuted
-            </p>
-
-            {/* BOUTON */}
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full py-3.5 rounded-xl font-bold text-sm tracking-widest uppercase transition-all"
-              style={{
-                background: loading
-                  ? 'rgba(212,175,55,0.2)'
-                  : 'linear-gradient(135deg, #D4AF37 0%, #F5E17A 40%, #D4AF37 60%, #A8860C 100%)',
-                color: loading
-                  ? '#D4AF37' :'#000000',
-                boxShadow: loading
-                  ? 'none' :'0 4px 20px rgba(212,175,55,0.2)',
-                cursor: loading
-                  ? 'not-allowed' :'pointer',
-              }}
-            >
-              {loading
-                ? 'Vérification...'
-                : 'Authentifier'}
-            </button>
-          </form>
-
-          {/* =====================================================
-              COMPTES CONCEPTEURS AUTORISÉS
-          ====================================================== */}
-          <div
-            className="mt-5 pt-4"
-            style={{
-              borderTop:
-                '1px solid rgba(212,175,55,0.08)',
-            }}
-          >
-            <p
-              className="text-[9px] uppercase tracking-widest text-center mb-3"
-              style={{
-                color: '#4A5568',
-              }}
-            >
-              Comptes concepteurs autorisés
-            </p>
-
-            <div className="space-y-2">
-              {AUTHORIZED_CONCEPTEURS.map(
-                (account) => (
-                  <button
-                    key={account.userId}
-                    type="button"
-                    disabled={loading}
-                    onClick={() =>
-                      selectAccount(account.email)
-                    }
-                    className="w-full rounded-lg px-3 py-2 text-left transition-all"
-                    style={{
-                      color: '#D4AF37',
-                      border:
-                        '1px solid rgba(212,175,55,0.1)',
-                      background:
-                        'rgba(212,175,55,0.02)',
-                      opacity: loading ? 0.5 : 1,
-                      cursor: loading
-                        ? 'not-allowed' :'pointer',
-                    }}
-                  >
-                    <span className="text-xs font-semibold">
-                      {account.email}
-                    </span>
-                  </button>
-                )
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* =====================================================
-            FOOTER
-        ====================================================== */}
-        <p
-          className="text-center text-[9px] uppercase tracking-widest mt-5"
-          style={{
-            color: '#252B38',
-          }}
-        >
-          Protected creator access · JDV CRM
-        </p>
-      </div>
-    </div>
+function isSuccessfulPayment(status: unknown): boolean {
+  return SUCCESSFUL_PAYMENT_STATUSES.includes(
+    String(status ?? '').toLowerCase()
   );
+}
+
+function normalizeSubscriptionStatus(
+  organizationStatus: string | null | undefined,
+  subscriptionStatus: string | null | undefined
+): EnterpriseRow['status_abonnement'] {
+  const orgStatus = String(organizationStatus ?? '').toLowerCase();
+  const subStatus = String(subscriptionStatus ?? '').toLowerCase();
+
+  if (
+    SUSPENDED_STATUSES.includes(orgStatus) ||
+    SUSPENDED_STATUSES.includes(subStatus)
+  ) {
+    return 'suspendu';
+  }
+
+  if (
+    ACTIVE_SUBSCRIPTION_STATUSES.includes(subStatus) &&
+    !SUSPENDED_STATUSES.includes(orgStatus)
+  ) {
+    return 'active';
+  }
+
+  if (TRIAL_SUBSCRIPTION_STATUSES.includes(subStatus)) {
+    return 'trial';
+  }
+
+  if (subStatus === 'expired' || orgStatus === 'expired') {
+    return 'expired';
+  }
+
+  if (
+    PENDING_STATUSES.includes(subStatus) ||
+    PENDING_STATUSES.includes(orgStatus) ||
+    orgStatus === 'pending'
+  ) {
+    return 'pending';
+  }
+
+  return 'pending';
+}
+
+function getTier(prospectorCount: number): EnterpriseRow['tier'] {
+  if (prospectorCount >= 20) {
+    return 'Entreprise';
+  }
+
+  if (prospectorCount >= 8) {
+    return 'Professionnel';
+  }
+
+  return 'Démarrage';
+}
+
+function formatMoney(amount: number, currency = 'XOF'): string {
+  const safeAmount = Number.isFinite(amount) ? amount : 0;
+
+  try {
+    return new Intl.NumberFormat('fr-FR', {
+      style: 'currency',
+      currency,
+      maximumFractionDigits: currency === 'XOF' ? 0 : 2,
+    }).format(safeAmount);
+  } catch {
+    return `${safeAmount.toLocaleString('fr-FR')} ${currency}`;
+  }
+}
+
+function getStartOfCurrentMonth(): string {
+  const now = new Date();
+
+  return new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    1,
+    0,
+    0,
+    0,
+    0
+  ).toISOString();
+}
+
+function getTodayStart(): string {
+  const now = new Date();
+
+  return new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+    0,
+    0,
+    0,
+    0
+  ).toISOString();
+}
+
+/* =========================================================
+   ORGANISATIONS
+========================================================= */
+
+async function fetchOrganizations(): Promise<OrganizationRow[]> {
+  const supabase = createClient();
+
+  const { data, error } = await supabase
+    .from('organizations')
+    .select(
+      `
+        id,
+        name,
+        email,
+        status,
+        subscription_status,
+        created_at
+      `
+    )
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    throw new Error(
+      `Erreur lors du chargement des entreprises : ${error.message}`
+    );
+  }
+
+  return (data ?? []) as OrganizationRow[];
+}
+
+/* =========================================================
+   PROSPECTEURS
+========================================================= */
+
+async function fetchProspecteurs(): Promise<ProspecteurRow[]> {
+  const supabase = createClient();
+
+  const { data, error } = await supabase.from('prospecteurs').select(
+    `
+      id,
+      organization_id,
+      status
+    `
+  );
+
+  if (error) {
+    throw new Error(
+      `Erreur lors du chargement des prospecteurs : ${error.message}`
+    );
+  }
+
+  return (data ?? []) as ProspecteurRow[];
+}
+
+/* =========================================================
+   ABONNEMENTS
+========================================================= */
+
+async function fetchSubscriptions(): Promise<
+  OrganizationSubscriptionRow[]
+> {
+  const supabase = createClient();
+
+  const { data, error } = await supabase
+    .from('organization_subscriptions')
+    .select(
+      `
+        id,
+        organization_id,
+        plan_id,
+        status,
+        started_at,
+        expires_at,
+        created_at
+      `
+    )
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    throw new Error(
+      `Erreur lors du chargement des abonnements : ${error.message}`
+    );
+  }
+
+  return (data ?? []) as OrganizationSubscriptionRow[];
+}
+
+/* =========================================================
+   PLANS
+========================================================= */
+
+async function fetchSubscriptionPlans(): Promise<SubscriptionPlanRow[]> {
+  const supabase = createClient();
+
+  const { data, error } = await supabase.from('subscription_plans').select(
+    `
+      id,
+      code,
+      name,
+      price,
+      currency,
+      duration_days
+    `
+  );
+
+  if (error) {
+    throw new Error(
+      `Erreur lors du chargement des plans : ${error.message}`
+    );
+  }
+
+  return (data ?? []) as SubscriptionPlanRow[];
+}
+
+/* =========================================================
+   REVENUS TERRAIN
+========================================================= */
+
+async function fetchTerrainPayments(): Promise<PaymentRow[]> {
+  const supabase = createClient();
+
+  const { data, error } = await supabase
+    .from('payments')
+    .select(
+      `
+        organization_id,
+        amount,
+        currency,
+        status,
+        payment_date,
+        created_at
+      `
+    )
+    .in('status', SUCCESSFUL_PAYMENT_STATUSES);
+
+  if (error) {
+    throw new Error(
+      `Erreur lors du chargement des paiements terrain : ${error.message}`
+    );
+  }
+
+  return (data ?? []) as PaymentRow[];
+}
+
+/* =========================================================
+   TOKENS JOURNALIERS
+========================================================= */
+
+async function fetchDailyTokens(): Promise<DailyTokenRow[]> {
+  const supabase = createClient();
+
+  const { data, error } = await supabase.from('daily_tokens').select(
+    `
+      organization_id,
+      paid_amount,
+      status,
+      token_date,
+      paid_at
+    `
+  );
+
+  if (error) {
+    throw new Error(
+      `Erreur lors du chargement des tokens journaliers : ${error.message}`
+    );
+  }
+
+  return (data ?? []) as DailyTokenRow[];
+}
+
+/* =========================================================
+   FETCH ALL ENTERPRISES
+========================================================= */
+
+export async function fetchAllEnterprises(): Promise<EnterpriseRow[]> {
+  await ensureSuperAdmin();
+
+  return buildEnterprises();
+}
+
+/* Version interne sans re-vérification, réutilisée par le snapshot global. */
+async function buildEnterprises(): Promise<EnterpriseRow[]> {
+  const [
+    organizations,
+    prospecteurs,
+    subscriptions,
+    plans,
+    payments,
+    dailyTokens,
+  ] = await Promise.all([
+    fetchOrganizations(),
+    fetchProspecteurs(),
+    fetchSubscriptions(),
+    fetchSubscriptionPlans(),
+    fetchTerrainPayments(),
+    fetchDailyTokens(),
+  ]);
+
+  /* Nombre de prospecteurs par entreprise */
+
+  const prospecteurCountMap = new Map<string, number>();
+
+  for (const prospecteur of prospecteurs) {
+    const current =
+      prospecteurCountMap.get(prospecteur.organization_id) ?? 0;
+
+    prospecteurCountMap.set(
+      prospecteur.organization_id,
+      current + 1
+    );
+  }
+
+  /* Dernier abonnement par entreprise */
+
+  const latestSubscriptionMap = new Map<
+    string,
+    OrganizationSubscriptionRow
+  >();
+
+  for (const subscription of subscriptions) {
+    const existing = latestSubscriptionMap.get(
+      subscription.organization_id
+    );
+
+    if (!existing) {
+      latestSubscriptionMap.set(
+        subscription.organization_id,
+        subscription
+      );
+      continue;
+    }
+
+    const existingDate = new Date(existing.created_at).getTime();
+    const currentDate = new Date(subscription.created_at).getTime();
+
+    if (currentDate > existingDate) {
+      latestSubscriptionMap.set(
+        subscription.organization_id,
+        subscription
+      );
+    }
+  }
+
+  /* Plans */
+
+  const planMap = new Map<string, SubscriptionPlanRow>();
+
+  for (const plan of plans) {
+    planMap.set(plan.id, plan);
+  }
+
+  /* Revenus terrain par entreprise */
+
+  const terrainRevenueMap = new Map<string, number>();
+
+  for (const payment of payments) {
+    if (!isSuccessfulPayment(payment.status)) {
+      continue;
+    }
+
+    const amount = toNumber(payment.amount);
+
+    const current =
+      terrainRevenueMap.get(payment.organization_id) ?? 0;
+
+    terrainRevenueMap.set(
+      payment.organization_id,
+      current + amount
+    );
+  }
+
+  /* Tokens du jour uniquement */
+
+  const today = new Date().toISOString().slice(0, 10);
+
+  const dailyRevenueMap = new Map<string, number>();
+
+  for (const token of dailyTokens) {
+    if (token.token_date !== today) {
+      continue;
+    }
+
+    const amount = toNumber(token.paid_amount);
+
+    const current =
+      dailyRevenueMap.get(token.organization_id) ?? 0;
+
+    dailyRevenueMap.set(
+      token.organization_id,
+      current + amount
+    );
+  }
+
+  /* Construction finale */
+
+  return organizations.map((organization) => {
+    const subscription = latestSubscriptionMap.get(organization.id);
+
+    const plan = subscription
+      ? planMap.get(subscription.plan_id)
+      : undefined;
+
+    const prospectorCount =
+      prospecteurCountMap.get(organization.id) ?? 0;
+
+    const status = normalizeSubscriptionStatus(
+      organization.status,
+      subscription?.status ?? organization.subscription_status
+    );
+
+    const currency = plan?.currency || 'XOF';
+
+    const mrr = plan
+      ? formatMoney(toNumber(plan.price), currency)
+      : formatMoney(0, currency);
+
+    return {
+      id: organization.id,
+
+      nom_entreprise: organization.name || 'Entreprise sans nom',
+
+      status_abonnement: status,
+
+      date_fin_abonnement: subscription?.expires_at ?? null,
+
+      trial_start_date:
+        status === 'trial' ? subscription?.started_at ?? null : null,
+
+      trial_end_date:
+        status === 'trial' ? subscription?.expires_at ?? null : null,
+
+      created_at: organization.created_at,
+
+      ownerEmail: organization.email ?? 'Non renseigné',
+
+      prospectorCount,
+
+      mrr,
+
+      tier: getTier(prospectorCount),
+
+      terrainRevenue: terrainRevenueMap.get(organization.id) ?? 0,
+
+      dailyRevenue: dailyRevenueMap.get(organization.id) ?? 0,
+    };
+  });
+}
+
+/* =========================================================
+   ACTIVER / SUSPENDRE UNE ENTREPRISE
+========================================================= */
+
+export async function toggleEnterpriseStatus(
+  enterpriseId: string,
+  action: 'activate' | 'suspend'
+): Promise<void> {
+  await ensureSuperAdmin();
+
+  if (!enterpriseId) {
+    throw new Error('Identifiant entreprise manquant.');
+  }
+
+  const supabase = createClient();
+
+  const newStatus = action === 'activate' ? 'active' : 'suspended';
+
+  const { error } = await supabase
+    .from('organizations')
+    .update({
+      status: newStatus,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', enterpriseId);
+
+  if (error) {
+    throw new Error(
+      `Impossible de modifier le statut de l'entreprise : ${error.message}`
+    );
+  }
+}
+
+/* =========================================================
+   KPI SUPER ADMIN
+========================================================= */
+
+export async function fetchSuperAdminKPIs(): Promise<SuperAdminKPIs> {
+  await ensureSuperAdmin();
+
+  return buildSuperAdminKPIs();
+}
+
+async function buildSuperAdminKPIs(): Promise<SuperAdminKPIs> {
+  const supabase = createClient();
+
+  const { data, error } = await supabase.from('organizations').select(
+    `
+      id,
+      status,
+      subscription_status
+    `
+  );
+
+  if (error) {
+    throw new Error(
+      `Erreur lors du calcul des KPI : ${error.message}`
+    );
+  }
+
+  const organizations = data ?? [];
+
+  if (organizations.length === 0) {
+    return emptyKPIs();
+  }
+
+  const result = emptyKPIs();
+
+  result.total = organizations.length;
+
+  for (const organization of organizations) {
+    const organizationStatus = String(
+      organization.status ?? ''
+    ).toLowerCase();
+
+    const subscriptionStatus = String(
+      organization.subscription_status ?? ''
+    ).toLowerCase();
+
+    /* SUSPENDU */
+    if (
+      SUSPENDED_STATUSES.includes(organizationStatus) ||
+      SUSPENDED_STATUSES.includes(subscriptionStatus)
+    ) {
+      result.suspended++;
+      continue;
+    }
+
+    /* ACTIF */
+    if (
+      organizationStatus === 'active' &&
+      subscriptionStatus === 'active'
+    ) {
+      result.active++;
+      continue;
+    }
+
+    /* PENDING / TRIAL / EXPIRED */
+    result.pending++;
+  }
+
+  return result;
+}
+
+/* =========================================================
+   ANALYTICS FINANCIÈRES
+========================================================= */
+
+export async function fetchFinancialAnalytics(): Promise<FinancialAnalytics> {
+  await ensureSuperAdmin();
+
+  return buildFinancialAnalytics();
+}
+
+async function buildFinancialAnalytics(): Promise<FinancialAnalytics> {
+  const supabase = createClient();
+
+  const [subscriptionPaymentsResult, subscriptionsResult] =
+    await Promise.all([
+      supabase
+        .from('subscription_payments')
+        .select(
+          `
+            amount,
+            currency,
+            status,
+            paid_at,
+            created_at
+          `
+        )
+        .in('status', SUCCESSFUL_PAYMENT_STATUSES),
+
+      supabase.from('organization_subscriptions').select(
+        `
+          id,
+          status
+        `
+      ),
+    ]);
+
+  if (subscriptionPaymentsResult.error) {
+    throw new Error(
+      `Erreur lors du chargement des revenus d'abonnement : ${subscriptionPaymentsResult.error.message}`
+    );
+  }
+
+  if (subscriptionsResult.error) {
+    throw new Error(
+      `Erreur lors du chargement des abonnements actifs : ${subscriptionsResult.error.message}`
+    );
+  }
+
+  const payments = (subscriptionPaymentsResult.data ??
+    []) as SubscriptionPaymentRow[];
+
+  const subscriptions = subscriptionsResult.data ?? [];
+
+  const analytics = emptyFinancialAnalytics();
+
+  const startOfMonth = getStartOfCurrentMonth();
+
+  for (const payment of payments) {
+    if (!isSuccessfulPayment(payment.status)) {
+      continue;
+    }
+
+    const amount = toNumber(payment.amount);
+
+    analytics.totalRevenue += amount;
+
+    const paymentDate = payment.paid_at || payment.created_at;
+
+    if (
+      paymentDate &&
+      new Date(paymentDate) >= new Date(startOfMonth)
+    ) {
+      analytics.monthlyRevenue += amount;
+    }
+
+    analytics.paymentCount++;
+  }
+
+  analytics.activeSubscriptions = subscriptions.filter(
+    (subscription) =>
+      String(subscription.status ?? '').toLowerCase() === 'active'
+  ).length;
+
+  return analytics;
+}
+
+/* =========================================================
+   REVENUS TERRAIN DU JOUR
+========================================================= */
+
+export async function fetchTodayTerrainRevenue(): Promise<number> {
+  await ensureSuperAdmin();
+
+  return buildTodayTerrainRevenue();
+}
+
+async function buildTodayTerrainRevenue(): Promise<number> {
+  const supabase = createClient();
+
+  const todayStart = getTodayStart();
+
+  const { data, error } = await supabase
+    .from('payments')
+    .select(
+      `
+        amount,
+        status,
+        payment_date
+      `
+    )
+    .gte('payment_date', todayStart)
+    .in('status', SUCCESSFUL_PAYMENT_STATUSES);
+
+  if (error) {
+    throw new Error(
+      `Erreur lors du calcul du revenu terrain du jour : ${error.message}`
+    );
+  }
+
+  return (data ?? []).reduce(
+    (total, payment) => total + toNumber(payment.amount),
+    0
+  );
+}
+
+/* =========================================================
+   REVENUS TOKENS DU JOUR
+========================================================= */
+
+export async function fetchTodayDailyTokenRevenue(): Promise<number> {
+  await ensureSuperAdmin();
+
+  return buildTodayDailyTokenRevenue();
+}
+
+async function buildTodayDailyTokenRevenue(): Promise<number> {
+  const supabase = createClient();
+
+  const today = new Date().toISOString().slice(0, 10);
+
+  const { data, error } = await supabase
+    .from('daily_tokens')
+    .select(
+      `
+        paid_amount,
+        token_date,
+        status
+      `
+    )
+    .eq('token_date', today);
+
+  if (error) {
+    throw new Error(
+      `Erreur lors du calcul des tokens du jour : ${error.message}`
+    );
+  }
+
+  return (data ?? []).reduce(
+    (total, token) => total + toNumber(token.paid_amount),
+    0
+  );
+}
+
+/* =========================================================
+   SNAPSHOT COMPLET DU DASHBOARD
+========================================================= */
+
+export async function fetchSuperAdminDashboard(): Promise<{
+  kpis: SuperAdminKPIs;
+  enterprises: EnterpriseRow[];
+  financial: FinancialAnalytics;
+  todayTerrainRevenue: number;
+  todayDailyTokenRevenue: number;
+}> {
+  /* Une seule vérification pour tout le snapshot. */
+  await ensureSuperAdmin();
+
+  const [
+    kpis,
+    enterprises,
+    financial,
+    todayTerrainRevenue,
+    todayDailyTokenRevenue,
+  ] = await Promise.all([
+    buildSuperAdminKPIs(),
+    buildEnterprises(),
+    buildFinancialAnalytics(),
+    buildTodayTerrainRevenue(),
+    buildTodayDailyTokenRevenue(),
+  ]);
+
+  return {
+    kpis,
+    enterprises,
+    financial,
+    todayTerrainRevenue,
+    todayDailyTokenRevenue,
+  };
 }

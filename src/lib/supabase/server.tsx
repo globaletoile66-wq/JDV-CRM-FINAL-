@@ -1,38 +1,38 @@
 import { createServerClient } from '@supabase/ssr';
+import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
 
 export async function createClient() {
   const cookieStore = await cookies();
-
-  const supabaseUrl = (process.env.NEXT_PUBLIC_SUPABASE_URL || '').trim();
-  const anonKey = (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '').trim();
-  const publishableKey = (process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || '').trim();
-
-  // Prefer anon key, fall back to publishable key
-  const supabaseKey = anonKey || publishableKey;
-
-  if (!supabaseUrl || !supabaseKey) {
-    throw new Error(
-      "Variables Supabase manquantes dans les variables d'environnement.",
-    );
-  }
-
-  return createServerClient(supabaseUrl, supabaseKey, {
+  const url = required('NEXT_PUBLIC_SUPABASE_URL');
+  const key = required('NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY', 'NEXT_PUBLIC_SUPABASE_ANON_KEY');
+  return createServerClient(url, key, {
     cookies: {
-      getAll() {
-        return cookieStore.getAll();
-      },
-      setAll(
-        cookiesToSet: { name: string; value: string; options?: Record<string, unknown> }[],
-      ) {
+      getAll: () => cookieStore.getAll(),
+      setAll(values) {
         try {
-          cookiesToSet.forEach(({ name, value, options }) => {
-            cookieStore.set(name, value, options as Parameters<typeof cookieStore.set>[2]);
-          });
+          values.forEach(({ name, value, options }) => cookieStore.set(name, value, options));
         } catch {
-          // setAll called from a Server Component — cookies are read-only
+          // Server Components cannot always mutate cookies. Middleware handles refresh.
         }
       },
     },
+  });
+}
+
+function required(...names: string[]): string {
+  for (const name of names) {
+    const value = (process.env[name] ?? '').trim();
+    if (value) return value;
+  }
+  throw new Error(`[JDV CRM] ${names.join(' ou ')} est manquante.`);
+}
+
+/** Server-only client. Never import this from a Client Component. */
+export function getAdminClient() {
+  const url = required('NEXT_PUBLIC_SUPABASE_URL');
+  const key = required('SUPABASE_SECRET_KEY', 'SUPABASE_SERVICE_ROLE_KEY');
+  return createSupabaseClient(url, key, {
+    auth: { autoRefreshToken: false, persistSession: false },
   });
 }

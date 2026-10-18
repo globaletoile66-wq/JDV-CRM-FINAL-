@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { toast } from 'sonner';
+import { createClient } from '@/lib/supabase/client';
 
 interface OnboardingModalProps {
   isOpen: boolean;
@@ -30,6 +31,8 @@ interface FormData {
   adminLastName: string;
   adminEmail: string;
   adminPhone: string;
+  adminPassword: string;
+  adminPasswordConfirm: string;
   subscriptionPlan: string;
 }
 
@@ -157,6 +160,8 @@ export default function OnboardingModal({
         'adminLastName',
         'adminEmail',
         'adminPhone',
+        'adminPassword',
+        'adminPasswordConfirm',
       ];
     }
 
@@ -187,7 +192,7 @@ export default function OnboardingModal({
     setSubmitError('');
 
     try {
-      const response = await fetch('/api/onboarding/register', {
+      const response = await fetch('/api/enterprise/register', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -197,13 +202,15 @@ export default function OnboardingModal({
           country: data.country,
           city: data.city.trim(),
           address: data.address.trim(),
+          city: data.city.trim(),
 
           adminFirstName: data.adminFirstName.trim(),
           adminLastName: data.adminLastName.trim(),
           adminEmail: data.adminEmail.trim().toLowerCase(),
           adminPhone: data.adminPhone.trim(),
+          adminPassword: data.adminPassword,
 
-          planCode: data.subscriptionPlan,
+          subscriptionTier: data.subscriptionPlan,
         }),
       });
 
@@ -216,12 +223,25 @@ export default function OnboardingModal({
         );
       }
 
-      if (result?.checkoutUrl) {
-        toast.success(
-          'Inscription enregistrée. Redirection vers le paiement...'
-        );
+      if (result?.success && result?.organizationId) {
+        // Le compte vient d’être créé côté serveur. On ouvre immédiatement
+        // une session puis on demande au checkout serveur de créer la transaction FedaPay.
+        const supabase = createClient();
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email: data.adminEmail.trim().toLowerCase(),
+          password: data.adminPassword,
+        });
+        if (signInError) throw new Error('Compte créé, mais impossible d’ouvrir la session administrateur. Connectez-vous puis reprenez le paiement.');
 
-        window.location.href = result.checkoutUrl;
+        const checkoutResponse = await fetch('/api/enterprise/checkout', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ organizationId: result.organizationId, planCode: data.subscriptionPlan }),
+        });
+        const checkout = await checkoutResponse.json().catch(() => null);
+        if (!checkoutResponse.ok || !checkout?.checkoutUrl) throw new Error(checkout?.error || 'Impossible de préparer le paiement FedaPay.');
+        toast.success('Compte créé. Redirection vers FedaPay...');
+        window.location.href = checkout.checkoutUrl;
         return;
       }
 
@@ -561,6 +581,40 @@ export default function OnboardingModal({
                       {errors.adminEmail.message}
                     </p>
                   )}
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-1.5">
+                    Mot de passe <span className="text-danger">*</span>
+                  </label>
+                  <input
+                    {...register('adminPassword', {
+                      required: 'Le mot de passe est requis',
+                      minLength: { value: 8, message: 'Minimum 8 caractères' },
+                    })}
+                    type="password"
+                    autoComplete="new-password"
+                    className="w-full bg-input border border-border rounded-md px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-colors"
+                    placeholder="Minimum 8 caractères"
+                  />
+                  {errors.adminPassword && <p className="text-xs text-danger mt-1">{errors.adminPassword.message}</p>}
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-foreground mb-1.5">
+                    Confirmer le mot de passe <span className="text-danger">*</span>
+                  </label>
+                  <input
+                    {...register('adminPasswordConfirm', {
+                      required: 'La confirmation est requise',
+                      validate: value => value === watch('adminPassword') || 'Les mots de passe ne correspondent pas',
+                    })}
+                    type="password"
+                    autoComplete="new-password"
+                    className="w-full bg-input border border-border rounded-md px-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-colors"
+                    placeholder="Répétez le mot de passe"
+                  />
+                  {errors.adminPasswordConfirm && <p className="text-xs text-danger mt-1">{errors.adminPasswordConfirm.message}</p>}
                 </div>
 
                 <div>
